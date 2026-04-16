@@ -8,3 +8,4 @@ pub mod hud;
 pub mod compositor;
 pub mod db;
 pub mod suggest;
+pub mod history;
