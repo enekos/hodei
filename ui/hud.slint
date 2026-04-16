@@ -5,6 +5,12 @@ export struct HintLabel {
     active: bool,
 }
 
+export struct SuggestionItem {
+    title: string,
+    url: string,
+    selected: bool,
+}
+
 export component HudWindow inherits Window {
     background: transparent;
 
@@ -16,6 +22,11 @@ export component HudWindow inherits Window {
     in property <int> tile-count: 1;
     in property <int> focused-index: 0;
     in property <[HintLabel]> hints: [];
+    in property <[SuggestionItem]> suggestions: [];
+    in property <bool> suggestions-visible: false;
+    in property <string> search-text: "";
+    in property <bool> search-visible: false;
+    in property <string> search-info: "";
 
     // Status bar at bottom
     Rectangle {
@@ -73,6 +84,72 @@ export component HudWindow inherits Window {
             color: white;
             font-size: 12px;
             vertical-alignment: center;
+        }
+    }
+
+    // Suggestion list (above command bar)
+    Rectangle {
+        visible: root.suggestions-visible;
+        y: parent.height - 48px - self.height;
+        width: parent.width;
+        height: min(root.suggestions.length * 24px, 240px);
+        background: #0d0d1aee;
+
+        VerticalLayout {
+            for item in root.suggestions: Rectangle {
+                height: 24px;
+                background: item.selected ? #333355 : transparent;
+
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+
+                    Text {
+                        text: item.title;
+                        color: item.selected ? white : #c0c0c0;
+                        font-size: 12px;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: item.url;
+                        color: #808080;
+                        font-size: 11px;
+                        overflow: elide;
+                        max-width: 300px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    // Search bar
+    Rectangle {
+        visible: root.search-visible;
+        y: parent.height - 48px;
+        width: parent.width;
+        height: 24px;
+        background: #0d0d1aee;
+
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+
+            Text {
+                text: "/" + root.search-text;
+                color: white;
+                font-size: 12px;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: root.search-info;
+                color: #808080;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
         }
     }
 

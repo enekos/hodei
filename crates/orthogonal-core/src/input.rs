@@ -36,6 +36,9 @@ pub enum Action {
     BookmarkDelete(String),
     ShowBookmarks(String),
     ShowHistory(String),
+    SuggestionNext,
+    SuggestionPrev,
+    CommandBufferChanged,
 }
 
 // === Router ===
@@ -130,13 +133,17 @@ impl InputRouter {
                 if let Mode::Command { buffer } = &mut self.mode {
                     buffer.pop();
                 }
-                vec![]
+                vec![Action::CommandBufferChanged]
             }
+            CoreKey::Char('n') if event.modifiers.ctrl => vec![Action::SuggestionNext],
+            CoreKey::Char('p') if event.modifiers.ctrl => vec![Action::SuggestionPrev],
+            CoreKey::Down => vec![Action::SuggestionNext],
+            CoreKey::Up => vec![Action::SuggestionPrev],
             CoreKey::Char(c) => {
                 if let Mode::Command { buffer } = &mut self.mode {
                     buffer.push(c);
                 }
-                vec![]
+                vec![Action::CommandBufferChanged]
             }
             _ => vec![],
         }
@@ -435,12 +442,46 @@ mod tests {
     }
 
     #[test]
+    fn command_mode_backspace_emits_buffer_changed() {
+        let mut router = InputRouter::new();
+        router.handle(&key(':'));
+        router.handle(&key('a'));
+        let actions = router.handle(&special(CoreKey::Backspace));
+        assert_eq!(actions, vec![Action::CommandBufferChanged]);
+    }
+
+    #[test]
+    fn command_mode_typing_emits_buffer_changed() {
+        let mut router = InputRouter::new();
+        router.handle(&key(':'));
+        let actions = router.handle(&key('o'));
+        assert_eq!(actions, vec![Action::CommandBufferChanged]);
+    }
+
+    #[test]
+    fn command_mode_arrow_down_emits_suggestion_next() {
+        let mut router = InputRouter::new();
+        router.handle(&key(':'));
+        let actions = router.handle(&special(CoreKey::Down));
+        assert_eq!(actions, vec![Action::SuggestionNext]);
+    }
+
+    #[test]
+    fn command_mode_ctrl_p_emits_suggestion_prev() {
+        let mut router = InputRouter::new();
+        router.handle(&key(':'));
+        let actions = router.handle(&ctrl_key('p'));
+        assert_eq!(actions, vec![Action::SuggestionPrev]);
+    }
+
+    #[test]
     fn command_backspace_removes_char() {
         let mut router = InputRouter::new();
         router.handle(&key(':'));
         router.handle(&key('a'));
         router.handle(&key('b'));
-        router.handle(&special(CoreKey::Backspace));
+        let actions = router.handle(&special(CoreKey::Backspace));
+        assert_eq!(actions, vec![Action::CommandBufferChanged]);
         if let Mode::Command { buffer } = router.mode() {
             assert_eq!(buffer, "a");
         } else {

@@ -143,6 +143,35 @@ impl Hud {
         self.hud_instance.set_hints(ModelRc::from(rc));
     }
 
+    pub fn set_suggestions(&self, suggestions: Vec<(String, String, bool)>) {
+        let model: Vec<SuggestionItem> = suggestions
+            .into_iter()
+            .map(|(title, url, selected)| SuggestionItem {
+                title: SharedString::from(title),
+                url: SharedString::from(url),
+                selected,
+            })
+            .collect();
+        let rc = Rc::new(VecModel::from(model));
+        self.hud_instance.set_suggestions(ModelRc::from(rc));
+    }
+
+    pub fn set_suggestions_visible(&self, visible: bool) {
+        self.hud_instance.set_suggestions_visible(visible);
+    }
+
+    pub fn set_search_text(&self, text: &str) {
+        self.hud_instance.set_search_text(SharedString::from(text));
+    }
+
+    pub fn set_search_visible(&self, visible: bool) {
+        self.hud_instance.set_search_visible(visible);
+    }
+
+    pub fn set_search_info(&self, info: &str) {
+        self.hud_instance.set_search_info(SharedString::from(info));
+    }
+
     pub fn clear_hints(&self) {
         let empty: Vec<HintLabel> = vec![];
         let rc = Rc::new(VecModel::from(empty));
