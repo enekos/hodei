@@ -32,6 +32,10 @@ pub enum Action {
     SaveSession,
     RestoreSession,
     Quit,
+    Bookmark(Option<String>),
+    BookmarkDelete(String),
+    ShowBookmarks(String),
+    ShowHistory(String),
 }
 
 // === Router ===
@@ -94,6 +98,7 @@ impl InputRouter {
             CoreKey::Char('r') if !m.ctrl => vec![Action::Reload],
             CoreKey::Char('b') if m.ctrl => vec![Action::Back],
             CoreKey::Char('f') if m.ctrl => vec![Action::Forward],
+            CoreKey::Char('B') if !m.ctrl => vec![Action::ShowBookmarks(String::new())],
             _ => vec![],
         }
     }
@@ -189,6 +194,25 @@ impl InputRouter {
             Some("quit" | "q") => vec![Action::Quit],
             Some("save") => vec![Action::SaveSession],
             Some("restore") => vec![Action::RestoreSession],
+            Some("bookmark") => {
+                let tags = parts.get(1).map(|s| s.to_string());
+                vec![Action::Bookmark(tags)]
+            }
+            Some("bookmark-delete") => {
+                if let Some(url) = parts.get(1) {
+                    vec![Action::BookmarkDelete(url.to_string())]
+                } else {
+                    vec![]
+                }
+            }
+            Some("bookmarks") => {
+                let query = parts.get(1).unwrap_or(&"").to_string();
+                vec![Action::ShowBookmarks(query)]
+            }
+            Some("history") => {
+                let query = parts.get(1).unwrap_or(&"").to_string();
+                vec![Action::ShowHistory(query)]
+            }
             _ => vec![],
         }
     }
@@ -363,6 +387,51 @@ mod tests {
         };
         assert!(router.handle(&event).is_empty());
         assert_eq!(*router.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn command_bookmark() {
+        let mut router = InputRouter::new();
+        router.handle(&key(':'));
+        for c in "bookmark rust,dev".chars() {
+            router.handle(&key(c));
+        }
+        let actions = router.handle(&special(CoreKey::Enter));
+        assert_eq!(actions, vec![Action::Bookmark(Some("rust,dev".into()))]);
+    }
+
+    #[test]
+    fn command_bookmarks_search() {
+        let mut router = InputRouter::new();
+        router.handle(&key(':'));
+        for c in "bookmarks rust".chars() {
+            router.handle(&key(c));
+        }
+        let actions = router.handle(&special(CoreKey::Enter));
+        assert_eq!(actions, vec![Action::ShowBookmarks("rust".into())]);
+    }
+
+    #[test]
+    fn command_history_search() {
+        let mut router = InputRouter::new();
+        router.handle(&key(':'));
+        for c in "history github".chars() {
+            router.handle(&key(c));
+        }
+        let actions = router.handle(&special(CoreKey::Enter));
+        assert_eq!(actions, vec![Action::ShowHistory("github".into())]);
+    }
+
+    #[test]
+    fn shift_b_shows_bookmarks() {
+        let mut router = InputRouter::new();
+        let event = CoreKeyEvent {
+            key: CoreKey::Char('B'),
+            state: KeyState::Pressed,
+            modifiers: Modifiers { shift: true, ..Default::default() },
+        };
+        let actions = router.handle(&event);
+        assert_eq!(actions, vec![Action::ShowBookmarks(String::new())]);
     }
 
     #[test]
