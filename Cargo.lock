@@ -5765,6 +5765,8 @@ dependencies = [
  "log",
  "orthogonal-core",
  "orthogonal-servo",
+ "serde",
+ "serde_json",
  "winit",
 ]
 

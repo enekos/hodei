@@ -3,6 +3,7 @@ pub mod view;
 pub mod layout;
 pub mod input;
 pub mod hint;
+pub mod search;
 pub mod session;
 pub mod hud;
 pub mod compositor;

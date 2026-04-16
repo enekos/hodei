@@ -131,6 +131,13 @@ impl Engine {
         }
     }
 
+    pub fn send_mouse_event(&self, view_id: ViewId, event: CoreMouseEvent) {
+        if let Some(handle) = self.tiles.get(&view_id) {
+            let servo_event = events::core_mouse_to_servo(&event);
+            handle.webview.notify_input_event(servo_event);
+        }
+    }
+
     pub fn send_click(&self, view_id: ViewId, x: f32, y: f32) {
         if let Some(handle) = self.tiles.get(&view_id) {
             let click = events::click_at(x, y);

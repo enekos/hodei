@@ -56,3 +56,55 @@ pub fn click_at(x: f32, y: f32) -> servo::InputEvent {
         webview_point,
     ))
 }
+
+/// Convert a core mouse event to a Servo InputEvent.
+pub fn core_mouse_to_servo(event: &CoreMouseEvent) -> servo::InputEvent {
+    match event {
+        CoreMouseEvent::Move { x, y } => {
+            let point = servo::DevicePoint::new(*x as f32, *y as f32);
+            let webview_point = servo::WebViewPoint::from(point);
+            servo::InputEvent::MouseMove(servo::MouseMoveEvent::new(webview_point))
+        }
+        CoreMouseEvent::Down { x, y, button } => {
+            let point = servo::DevicePoint::new(*x as f32, *y as f32);
+            let webview_point = servo::WebViewPoint::from(point);
+            let servo_button = mouse_button_to_servo(button);
+            servo::InputEvent::MouseButton(servo::MouseButtonEvent::new(
+                servo::MouseButtonAction::Down,
+                servo_button,
+                webview_point,
+            ))
+        }
+        CoreMouseEvent::Up { x, y, button } => {
+            let point = servo::DevicePoint::new(*x as f32, *y as f32);
+            let webview_point = servo::WebViewPoint::from(point);
+            let servo_button = mouse_button_to_servo(button);
+            servo::InputEvent::MouseButton(servo::MouseButtonEvent::new(
+                servo::MouseButtonAction::Up,
+                servo_button,
+                webview_point,
+            ))
+        }
+        CoreMouseEvent::Scroll { x, y, delta_x, delta_y } => {
+            let point = servo::DevicePoint::new(*x as f32, *y as f32);
+            let webview_point = servo::WebViewPoint::from(point);
+            servo::InputEvent::Wheel(servo::WheelEvent::new(
+                servo::WheelDelta {
+                    x: *delta_x as f64,
+                    y: *delta_y as f64,
+                    z: 0.0,
+                    mode: servo::WheelMode::DeltaPixel,
+                },
+                webview_point,
+            ))
+        }
+    }
+}
+
+fn mouse_button_to_servo(button: &MouseButton) -> servo::MouseButton {
+    match button {
+        MouseButton::Left => servo::MouseButton::Left,
+        MouseButton::Right => servo::MouseButton::Right,
+        MouseButton::Middle => servo::MouseButton::Middle,
+    }
+}

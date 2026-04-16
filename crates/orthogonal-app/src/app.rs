@@ -11,6 +11,7 @@ use orthogonal_core::config::Config;
 use orthogonal_core::db;
 use orthogonal_core::hint;
 use orthogonal_core::history::HistoryManager;
+use orthogonal_core::search;
 use orthogonal_core::hud::Hud;
 use orthogonal_core::input::{Action, InputRouter, Mode};
 use orthogonal_core::layout::BspLayout;
@@ -50,6 +51,7 @@ pub struct App {
     views: ViewManager,
     input: InputRouter,
     modifiers: winit::keyboard::ModifiersState,
+    mouse_position: (f64, f64),
     tile_textures: std::collections::HashMap<ViewId, glow::Texture>,
     // Hint mode state
     hint_elements: Vec<HintElement>,
@@ -64,6 +66,12 @@ pub struct App {
     suggestions: Vec<Suggestion>,
     suggestion_index: usize,
     last_search_query: String,
+    // Search state
+    search_result_tx: mpsc::Sender<search::SearchResult>,
+    search_result_rx: mpsc::Receiver<search::SearchResult>,
+    current_search_result: search::SearchResult,
+    // Zoom state (per tile zoom level)
+    tile_zoom_levels: std::collections::HashMap<ViewId, f32>,
 }
 
 impl App {
@@ -75,6 +83,7 @@ impl App {
         let config = Config::load(&config_path);
         let input = InputRouter::with_overrides(&config.keybindings);
         let (hint_result_tx, hint_result_rx) = mpsc::channel();
+        let (search_result_tx, search_result_rx) = mpsc::channel();
 
         Self {
             proxy,
@@ -87,6 +96,7 @@ impl App {
             views: ViewManager::new(),
             input,
             modifiers: winit::keyboard::ModifiersState::empty(),
+            mouse_position: (0.0, 0.0),
             tile_textures: std::collections::HashMap::new(),
             hint_elements: Vec::new(),
             hint_labels: Vec::new(),
@@ -98,6 +108,10 @@ impl App {
             suggestions: Vec::new(),
             suggestion_index: 0,
             last_search_query: String::new(),
+            search_result_tx,
+            search_result_rx,
+            current_search_result: search::SearchResult { index: 0, count: 0 },
+            tile_zoom_levels: std::collections::HashMap::new(),
         }
     }
 
@@ -254,27 +268,32 @@ impl App {
                         hud.set_search_text(&query);
                         hud.request_redraw();
                     }
+                    if !query.is_empty() {
+                        self.inject_search_init(&query);
+                    }
                     self.update_hud();
                 }
                 Action::SearchNext => {
-                    // JS injection would go here when Servo is available
-                    log::debug!("Search next for: {}", self.last_search_query);
+                    self.inject_search_navigate(1);
                 }
                 Action::SearchPrev => {
-                    log::debug!("Search prev for: {}", self.last_search_query);
+                    self.inject_search_navigate(-1);
                 }
                 Action::SearchClear => {
                     self.last_search_query.clear();
+                    self.current_search_result = search::SearchResult { index: 0, count: 0 };
+                    self.inject_search_clear();
                     if let Some(hud) = &self.hud {
                         hud.set_search_visible(false);
+                        hud.set_search_info("");
                         hud.request_redraw();
                     }
                     self.update_hud();
                 }
                 Action::SaveSession => {
+                    let (nodes, focused) = self.layout.serialize();
+                    let tiles = self.collect_tile_rows();
                     if let Some(workspace) = &mut self.workspace {
-                        let (nodes, focused) = self.layout.serialize();
-                        let tiles = self.collect_tile_rows();
                         if let Err(e) = workspace.save_active(&nodes, &tiles, focused) {
                             log::error!("Failed to save: {}", e);
                         } else {
@@ -340,11 +359,30 @@ impl App {
                         self.update_suggestion_display();
                     }
                 }
+                Action::ZoomIn => {
+                    self.adjust_zoom(0.1);
+                }
+                Action::ZoomOut => {
+                    self.adjust_zoom(-0.1);
+                }
+                Action::ZoomReset => {
+                    if let Some(focused) = self.layout.focused() {
+                        self.tile_zoom_levels.insert(focused, 1.0);
+                        self.apply_zoom(focused, 1.0);
+                    }
+                }
+                Action::YankUrl => {
+                    if let Some(focused) = self.layout.focused() {
+                        if let Some(view) = self.views.get(focused) {
+                            self.copy_to_clipboard(&view.url);
+                            log::info!("Yanked URL: {}", view.url);
+                        }
+                    }
+                }
                 Action::WorkspaceSwitch(name) => {
+                    let (current_nodes, current_focused) = self.layout.serialize();
+                    let current_tiles = self.collect_tile_rows();
                     if let Some(workspace) = &mut self.workspace {
-                        let (current_nodes, current_focused) = self.layout.serialize();
-                        let current_tiles = self.collect_tile_rows();
-
                         match workspace.switch_to(&name, &current_nodes, &current_tiles, current_focused) {
                             Ok(Some(state)) => {
                                 // Tear down current
@@ -592,6 +630,167 @@ impl App {
         }
     }
 
+    fn inject_search_init(&self, query: &str) {
+        if let Some(focused) = self.layout.focused() {
+            if let Some(engine) = &self.engine {
+                let tx = self.search_result_tx.clone();
+                let q = query.to_string();
+                engine.evaluate_js(
+                    focused,
+                    &format!("{}('{}')", search::SEARCH_INIT_SCRIPT.trim_end_matches("()"), q.replace('\\', "\\\\").replace('\'', "\\'")),
+                    Box::new(move |result| {
+                        if let Ok(json) = result {
+                            if let Ok(count) = serde_json::from_str::<serde_json::Value>(&json)
+                                .and_then(|v| Ok(v.get("count").and_then(|c| c.as_u64()).unwrap_or(0) as usize))
+                            {
+                                let _ = tx.send(search::SearchResult { index: if count > 0 { 1 } else { 0 }, count });
+                            }
+                        }
+                    }),
+                );
+            }
+        }
+    }
+
+    fn inject_search_navigate(&self, offset: i32) {
+        if let Some(focused) = self.layout.focused() {
+            if let Some(engine) = &self.engine {
+                let tx = self.search_result_tx.clone();
+                engine.evaluate_js(
+                    focused,
+                    &format!("{}({})", search::SEARCH_NAVIGATE_SCRIPT.trim_end_matches("()"), offset),
+                    Box::new(move |result| {
+                        if let Ok(json) = result {
+                            if let Ok((index, count)) = serde_json::from_str::<serde_json::Value>(&json)
+                                .and_then(|v| {
+                                    let index = v.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
+                                    let count = v.get("count").and_then(|c| c.as_u64()).unwrap_or(0) as usize;
+                                    Ok((index, count))
+                                })
+                            {
+                                let _ = tx.send(search::SearchResult { index, count });
+                            }
+                        }
+                    }),
+                );
+            }
+        }
+    }
+
+    fn inject_search_clear(&self) {
+        if let Some(focused) = self.layout.focused() {
+            if let Some(engine) = &self.engine {
+                engine.evaluate_js(
+                    focused,
+                    &format!("{}()", search::SEARCH_CLEAR_SCRIPT),
+                    Box::new(|_| {}),
+                );
+            }
+        }
+    }
+
+    fn process_search_results(&mut self) {
+        while let Ok(result) = self.search_result_rx.try_recv() {
+            self.current_search_result = result.clone();
+            if let Some(hud) = &self.hud {
+                hud.set_search_info(&result.info_string());
+                hud.request_redraw();
+            }
+        }
+    }
+
+    fn adjust_zoom(&mut self, delta: f32) {
+        if let Some(focused) = self.layout.focused() {
+            let current = self.tile_zoom_levels.get(&focused).copied().unwrap_or(1.0);
+            let new_zoom = (current + delta).clamp(0.25, 5.0);
+            self.tile_zoom_levels.insert(focused, new_zoom);
+            self.apply_zoom(focused, new_zoom);
+        }
+    }
+
+    fn apply_zoom(&self, view_id: ViewId, zoom: f32) {
+        if let Some(engine) = &self.engine {
+            let script = format!(
+                "(function() {{ document.body.style.zoom = '{}'; }})()",
+                zoom
+            );
+            engine.evaluate_js(view_id, &script, Box::new(|_| {}));
+        }
+    }
+
+    fn copy_to_clipboard(&self, text: &str) {
+        use std::process::{Command, Stdio};
+        #[cfg(target_os = "macos")]
+        let mut child = Command::new("pbcopy")
+            .stdin(Stdio::piped())
+            .spawn()
+            .expect("pbcopy failed");
+        #[cfg(target_os = "linux")]
+        let mut child = Command::new("wl-copy")
+            .stdin(Stdio::piped())
+            .spawn()
+            .or_else(|_| Command::new("xclip").args(["-selection", "clipboard"]).stdin(Stdio::piped()).spawn())
+            .expect("clipboard copy failed");
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        compile_error!("clipboard not implemented for this OS");
+        
+        use std::io::Write;
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(text.as_bytes());
+        }
+    }
+
+    fn click_to_focus(&mut self, x: f32, y: f32) {
+        let resolved = self.layout.resolve();
+        for (view_id, rect) in resolved {
+            if rect.contains(x, y) {
+                if self.layout.focused() != Some(view_id) {
+                    self.layout.set_focused(view_id);
+                    self.update_hud();
+                    self.request_redraw();
+                }
+                break;
+            }
+        }
+    }
+
+    fn dispatch_mouse_event(&self, event: CoreMouseEvent) {
+        // Only forward mouse events when in Insert mode or for clicks/scrolling
+        if let Some(focused) = self.layout.focused() {
+            // Convert global window coordinates to tile-local coordinates
+            let local_event = if let Some(resolved) = self.layout.resolve().into_iter().find(|(id, _)| *id == focused) {
+                let rect = resolved.1;
+                match event {
+                    CoreMouseEvent::Move { x, y } => CoreMouseEvent::Move {
+                        x: x - rect.x,
+                        y: y - rect.y,
+                    },
+                    CoreMouseEvent::Down { x, y, button } => CoreMouseEvent::Down {
+                        x: x - rect.x,
+                        y: y - rect.y,
+                        button,
+                    },
+                    CoreMouseEvent::Up { x, y, button } => CoreMouseEvent::Up {
+                        x: x - rect.x,
+                        y: y - rect.y,
+                        button,
+                    },
+                    CoreMouseEvent::Scroll { x, y, delta_x, delta_y } => CoreMouseEvent::Scroll {
+                        x: x - rect.x,
+                        y: y - rect.y,
+                        delta_x,
+                        delta_y,
+                    },
+                }
+            } else {
+                event
+            };
+            if let Some(engine) = &self.engine {
+                engine.send_mouse_event(focused, local_event);
+            }
+        }
+    }
+
     fn request_redraw(&self) {
         if let Some(window) = &self.window {
             window.request_redraw();
@@ -621,9 +820,9 @@ impl App {
     }
 
     fn autosave(&mut self) {
+        let (nodes, focused) = self.layout.serialize();
+        let tiles = self.collect_tile_rows();
         if let Some(workspace) = &mut self.workspace {
-            let (nodes, focused) = self.layout.serialize();
-            let tiles = self.collect_tile_rows();
             if let Err(e) = workspace.save_active(&nodes, &tiles, focused) {
                 log::error!("Autosave failed: {}", e);
             }
@@ -789,6 +988,55 @@ impl ApplicationHandler<UserEvent> for App {
                 self.modifiers = new_modifiers.state();
             }
 
+            WindowEvent::CursorMoved { position, .. } => {
+                self.mouse_position = (position.x, position.y);
+                self.dispatch_mouse_event(CoreMouseEvent::Move {
+                    x: position.x as f32,
+                    y: position.y as f32,
+                });
+            }
+
+            WindowEvent::MouseInput { state: button_state, button, .. } => {
+                let (mx, my) = self.mouse_position;
+                let core_button = match button {
+                    winit::event::MouseButton::Left => MouseButton::Left,
+                    winit::event::MouseButton::Right => MouseButton::Right,
+                    winit::event::MouseButton::Middle => MouseButton::Middle,
+                    _ => MouseButton::Left,
+                };
+                let event = match button_state {
+                    winit::event::ElementState::Pressed => CoreMouseEvent::Down {
+                        x: mx as f32,
+                        y: my as f32,
+                        button: core_button,
+                    },
+                    winit::event::ElementState::Released => CoreMouseEvent::Up {
+                        x: mx as f32,
+                        y: my as f32,
+                        button: core_button,
+                    },
+                };
+                // Click-to-focus: if clicking inside a non-focused tile, focus it
+                if let CoreMouseEvent::Down { x, y, .. } = event {
+                    self.click_to_focus(x, y);
+                }
+                self.dispatch_mouse_event(event);
+            }
+
+            WindowEvent::MouseWheel { delta, .. } => {
+                let (mx, my) = self.mouse_position;
+                let (dx, dy) = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(x, y) => (x * 20.0, y * 20.0),
+                    winit::event::MouseScrollDelta::PixelDelta(p) => (p.x as f32, p.y as f32),
+                };
+                self.dispatch_mouse_event(CoreMouseEvent::Scroll {
+                    x: mx as f32,
+                    y: my as f32,
+                    delta_x: dx,
+                    delta_y: dy,
+                });
+            }
+
             WindowEvent::Resized(size) => {
                 self.layout.set_viewport(Rect::new(
                     0.0, 0.0,
@@ -856,6 +1104,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 self.process_metadata_events();
                 self.process_hint_results();
+                self.process_search_results();
                 self.request_redraw();
             }
         }

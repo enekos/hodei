@@ -110,6 +110,10 @@ pub enum Action {
     SearchNext,
     SearchPrev,
     SearchClear,
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
+    YankUrl,
     WorkspaceSwitch(String),
     WorkspaceNew(String),
     WorkspaceDelete(String),
@@ -169,6 +173,10 @@ impl InputRouter {
         map.insert(KeyCombo::new(CoreKey::Char('f'), true, false), Action::Forward);
         map.insert(KeyCombo::new(CoreKey::Char('n'), false, false), Action::SearchNext);
         map.insert(KeyCombo::new(CoreKey::Char('N'), false, false), Action::SearchPrev);
+        map.insert(KeyCombo::new(CoreKey::Char('+'), false, false), Action::ZoomIn);
+        map.insert(KeyCombo::new(CoreKey::Char('-'), false, false), Action::ZoomOut);
+        map.insert(KeyCombo::new(CoreKey::Char('0'), false, false), Action::ZoomReset);
+        map.insert(KeyCombo::new(CoreKey::Char('y'), false, false), Action::YankUrl);
         map.insert(KeyCombo::new(CoreKey::Char('B'), false, false), Action::ShowBookmarks(String::new()));
         map
     }
@@ -191,6 +199,10 @@ impl InputRouter {
             "search" => Some(Action::EnterSearch),
             "search_next" => Some(Action::SearchNext),
             "search_prev" => Some(Action::SearchPrev),
+            "zoom_in" => Some(Action::ZoomIn),
+            "zoom_out" => Some(Action::ZoomOut),
+            "zoom_reset" => Some(Action::ZoomReset),
+            "yank_url" => Some(Action::YankUrl),
             "bookmarks" => Some(Action::ShowBookmarks(String::new())),
             _ => None,
         }
