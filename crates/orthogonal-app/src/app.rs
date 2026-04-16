@@ -251,6 +251,33 @@ impl App {
         }
     }
 
+    fn process_metadata_events(&mut self) {
+        let events = match &self.engine {
+            Some(engine) => engine.drain_metadata_events(),
+            None => return,
+        };
+        let mut needs_hud_update = false;
+        for event in events {
+            match event {
+                MetadataEvent::UrlChanged { view_id, url } => {
+                    if let Some(view) = self.views.get_mut(view_id) {
+                        view.url = url;
+                        needs_hud_update = true;
+                    }
+                }
+                MetadataEvent::TitleChanged { view_id, title } => {
+                    if let Some(view) = self.views.get_mut(view_id) {
+                        view.title = title;
+                        needs_hud_update = true;
+                    }
+                }
+            }
+        }
+        if needs_hud_update {
+            self.update_hud();
+        }
+    }
+
     fn request_redraw(&self) {
         if let Some(window) = &self.window {
             window.request_redraw();
@@ -439,6 +466,7 @@ impl ApplicationHandler<UserEvent> for App {
                 if let Some(engine) = &mut self.engine {
                     engine.spin();
                 }
+                self.process_metadata_events();
                 self.request_redraw();
             }
         }

@@ -1,6 +1,7 @@
-use orthogonal_core::types::ViewId;
+use orthogonal_core::types::{ViewId, MetadataEvent};
+use std::sync::mpsc::Sender;
 
-/// Engine-level delegate. Most methods are no-ops for v0.1.0.
+/// Engine-level delegate.
 pub struct OrthoServoDelegate;
 
 impl servo::ServoDelegate for OrthoServoDelegate {
@@ -9,14 +10,15 @@ impl servo::ServoDelegate for OrthoServoDelegate {
     }
 }
 
-/// Per-WebView delegate. Routes events back to the app.
+/// Per-WebView delegate. Routes events back to the app via channel.
 pub struct OrthoWebViewDelegate {
     pub view_id: ViewId,
+    pub metadata_tx: Sender<MetadataEvent>,
 }
 
 impl OrthoWebViewDelegate {
-    pub fn new(view_id: ViewId) -> Self {
-        Self { view_id }
+    pub fn new(view_id: ViewId, metadata_tx: Sender<MetadataEvent>) -> Self {
+        Self { view_id, metadata_tx }
     }
 }
 
@@ -27,9 +29,19 @@ impl servo::WebViewDelegate for OrthoWebViewDelegate {
 
     fn notify_url_changed(&self, _webview: servo::WebView, url: url::Url) {
         log::debug!("URL changed for {:?}: {}", self.view_id, url);
+        let _ = self.metadata_tx.send(MetadataEvent::UrlChanged {
+            view_id: self.view_id,
+            url: url.to_string(),
+        });
     }
 
     fn notify_page_title_changed(&self, _webview: servo::WebView, title: Option<String>) {
         log::debug!("Title changed for {:?}: {:?}", self.view_id, title);
+        if let Some(title) = title {
+            let _ = self.metadata_tx.send(MetadataEvent::TitleChanged {
+                view_id: self.view_id,
+                title,
+            });
+        }
     }
 }

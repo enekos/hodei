@@ -152,6 +152,14 @@ pub struct TileRow {
     pub scroll_y: f64,
 }
 
+// === Metadata events (from Servo delegate back to app) ===
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MetadataEvent {
+    UrlChanged { view_id: ViewId, url: String },
+    TitleChanged { view_id: ViewId, title: String },
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

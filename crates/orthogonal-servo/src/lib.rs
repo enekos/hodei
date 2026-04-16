@@ -5,6 +5,7 @@ pub mod events;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::mpsc;
 
 use orthogonal_core::types::*;
 use servo::RenderingContext;
@@ -21,6 +22,8 @@ pub struct Engine {
     servo: servo::Servo,
     ctx_manager: RenderContextManager,
     tiles: HashMap<ViewId, TileHandle>,
+    metadata_tx: mpsc::Sender<MetadataEvent>,
+    metadata_rx: mpsc::Receiver<MetadataEvent>,
 }
 
 struct TileHandle {
@@ -45,10 +48,14 @@ impl Engine {
         let delegate = Rc::new(OrthoServoDelegate);
         servo.set_delegate(delegate);
 
+        let (metadata_tx, metadata_rx) = mpsc::channel();
+
         Self {
             servo,
             ctx_manager,
             tiles: HashMap::new(),
+            metadata_tx,
+            metadata_rx,
         }
     }
 
@@ -57,7 +64,7 @@ impl Engine {
         let url = Url::parse(url_str).unwrap_or_else(|_| {
             Url::parse(&format!("https://{}", url_str)).expect("invalid URL")
         });
-        let delegate = Rc::new(OrthoWebViewDelegate::new(view_id));
+        let delegate = Rc::new(OrthoWebViewDelegate::new(view_id, self.metadata_tx.clone()));
         let webview = servo::WebViewBuilder::new(&self.servo, offscreen_ctx.clone())
             .url(url)
             .delegate(delegate)
@@ -152,6 +159,14 @@ impl Engine {
 
     pub fn spin(&mut self) {
         self.servo.spin_event_loop();
+    }
+
+    pub fn drain_metadata_events(&self) -> Vec<MetadataEvent> {
+        let mut events = Vec::new();
+        while let Ok(event) = self.metadata_rx.try_recv() {
+            events.push(event);
+        }
+        events
     }
 
     pub fn gl_context(&self) -> Arc<glow::Context> {
