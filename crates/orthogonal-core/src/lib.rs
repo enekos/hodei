@@ -6,3 +6,5 @@ pub mod hint;
 pub mod session;
 pub mod hud;
 pub mod compositor;
+pub mod db;
+pub mod suggest;
