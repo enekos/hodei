@@ -4,6 +4,7 @@ use rusqlite::Connection;
 
 const MIGRATION_001: &str = include_str!("../../../migrations/001_init.sql");
 const MIGRATION_002: &str = include_str!("../../../migrations/002_history_bookmarks.sql");
+const MIGRATION_003: &str = include_str!("../../../migrations/003_workspaces.sql");
 
 pub fn open_database(path: &Path) -> Result<Rc<Connection>, rusqlite::Error> {
     let conn = Connection::open(path)?;
@@ -22,6 +23,13 @@ pub fn open_database_in_memory() -> Result<Rc<Connection>, rusqlite::Error> {
 fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch(MIGRATION_001)?;
     conn.execute_batch(MIGRATION_002)?;
+    // Migration 003 adds columns - check if they already exist
+    let has_is_active: bool = conn
+        .prepare("SELECT is_active FROM sessions LIMIT 0")
+        .is_ok();
+    if !has_is_active {
+        conn.execute_batch(MIGRATION_003)?;
+    }
     Ok(())
 }
 

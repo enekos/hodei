@@ -110,6 +110,10 @@ pub enum Action {
     SearchNext,
     SearchPrev,
     SearchClear,
+    WorkspaceSwitch(String),
+    WorkspaceNew(String),
+    WorkspaceDelete(String),
+    WorkspaceList,
 }
 
 // === Router ===
@@ -378,6 +382,27 @@ impl InputRouter {
             Some("history") => {
                 let query = parts.get(1).unwrap_or(&"").to_string();
                 vec![Action::ShowHistory(query)]
+            }
+            Some("workspace" | "ws") => {
+                if let Some(name) = parts.get(1) {
+                    vec![Action::WorkspaceSwitch(name.to_string())]
+                } else {
+                    vec![Action::WorkspaceList]
+                }
+            }
+            Some("workspace-new") => {
+                if let Some(name) = parts.get(1) {
+                    vec![Action::WorkspaceNew(name.to_string())]
+                } else {
+                    vec![]
+                }
+            }
+            Some("workspace-delete") => {
+                if let Some(name) = parts.get(1) {
+                    vec![Action::WorkspaceDelete(name.to_string())]
+                } else {
+                    vec![]
+                }
             }
             _ => vec![],
         }
