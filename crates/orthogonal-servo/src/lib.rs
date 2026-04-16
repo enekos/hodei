@@ -21,7 +21,6 @@ pub struct Engine {
     servo: servo::Servo,
     ctx_manager: RenderContextManager,
     tiles: HashMap<ViewId, TileHandle>,
-    next_id: u64,
 }
 
 struct TileHandle {
@@ -50,30 +49,23 @@ impl Engine {
             servo,
             ctx_manager,
             tiles: HashMap::new(),
-            next_id: 1,
         }
     }
 
-    pub fn create_tile(&mut self, url_str: &str) -> ViewId {
-        let id = ViewId(self.next_id);
-        self.next_id += 1;
-
-        let offscreen_ctx = self.ctx_manager.create_offscreen(id, 800, 600);
+    pub fn create_tile(&mut self, view_id: ViewId, url_str: &str) {
+        let offscreen_ctx = self.ctx_manager.create_offscreen(view_id, 800, 600);
         let url = Url::parse(url_str).unwrap_or_else(|_| {
             Url::parse(&format!("https://{}", url_str)).expect("invalid URL")
         });
-
-        let delegate = Rc::new(OrthoWebViewDelegate::new(id));
+        let delegate = Rc::new(OrthoWebViewDelegate::new(view_id));
         let webview = servo::WebViewBuilder::new(&self.servo, offscreen_ctx.clone())
             .url(url)
             .delegate(delegate)
             .build();
-
-        self.tiles.insert(id, TileHandle {
+        self.tiles.insert(view_id, TileHandle {
             webview,
             rendering_context: offscreen_ctx,
         });
-        id
     }
 
     pub fn destroy_tile(&mut self, view_id: ViewId) {

@@ -80,14 +80,11 @@ impl App {
                 }
                 Action::SplitView(dir) => {
                     if let Some(focused) = self.layout.focused() {
-                        let _new_id = self.layout.split(focused, dir);
-                        let _view_id = self.views.create("about:blank");
+                        let new_id = self.views.create("about:blank");
+                        self.layout.split(focused, dir, new_id);
                         if let Some(engine) = &mut self.engine {
-                            engine.create_tile("about:blank");
+                            engine.create_tile(new_id, "about:blank");
                         }
-                        // Note: BSP assigns its own IDs. For a real implementation,
-                        // we would coordinate BSP view_ids with ViewManager IDs.
-                        // Here we ignore new_id for simplicity.
                         self.update_hud();
                         self.request_redraw();
                     }
@@ -349,7 +346,7 @@ impl ApplicationHandler<UserEvent> for App {
         // Create first tile
         let view_id = self.views.create("https://servo.org");
         self.layout.add_first_view(view_id);
-        engine.create_tile("https://servo.org");
+        engine.create_tile(view_id, "https://servo.org");
 
         // Initialize compositor
         let gl = engine.gl_context();

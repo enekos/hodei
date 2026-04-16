@@ -21,6 +21,10 @@ impl ViewManager {
         }
     }
 
+    pub fn next_id(&self) -> ViewId {
+        ViewId(self.next_id)
+    }
+
     pub fn create(&mut self, url: &str) -> ViewId {
         let id = ViewId(self.next_id);
         self.next_id += 1;
@@ -31,6 +35,18 @@ impl ViewManager {
             dirty: true,
         });
         id
+    }
+
+    pub fn create_with_id(&mut self, id: ViewId, url: &str) {
+        self.views.insert(id, View {
+            id,
+            url: url.to_string(),
+            title: String::new(),
+            dirty: true,
+        });
+        if id.0 >= self.next_id {
+            self.next_id = id.0 + 1;
+        }
     }
 
     pub fn remove(&mut self, id: ViewId) -> Option<View> {
@@ -102,6 +118,17 @@ mod tests {
         assert_eq!(view.url, "https://test.com");
         assert_eq!(vm.count(), 0);
         assert!(vm.get(id).is_none());
+    }
+
+    #[test]
+    fn create_with_id_preserves_id() {
+        let mut vm = ViewManager::new();
+        vm.create_with_id(ViewId(42), "https://test.com");
+        let view = vm.get(ViewId(42)).unwrap();
+        assert_eq!(view.url, "https://test.com");
+        assert_eq!(view.id, ViewId(42));
+        let auto = vm.create("https://other.com");
+        assert_eq!(auto, ViewId(43));
     }
 
     #[test]
