@@ -5,15 +5,19 @@ use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::window::{Window, WindowAttributes, WindowId};
 use glow::HasContext;
 
+use orthogonal_core::bookmarks::BookmarkManager;
 use orthogonal_core::compositor::Compositor;
+use orthogonal_core::config::Config;
 use orthogonal_core::db;
 use orthogonal_core::hint;
+use orthogonal_core::history::HistoryManager;
 use orthogonal_core::hud::Hud;
 use orthogonal_core::input::{Action, InputRouter, Mode};
 use orthogonal_core::layout::BspLayout;
-use orthogonal_core::session::SessionManager;
+use orthogonal_core::suggest::{self, Suggestion, SuggestionSource};
 use orthogonal_core::types::*;
 use orthogonal_core::view::ViewManager;
+use orthogonal_core::workspace::WorkspaceManager;
 use orthogonal_servo::Engine;
 
 use crate::UserEvent;
@@ -37,6 +41,7 @@ impl orthogonal_servo::ServoEventLoopWaker for WinitWaker {
 
 pub struct App {
     proxy: EventLoopProxy<UserEvent>,
+    config: Config,
     window: Option<Window>,
     engine: Option<Engine>,
     hud: Option<Hud>,
@@ -45,35 +50,54 @@ pub struct App {
     views: ViewManager,
     input: InputRouter,
     modifiers: winit::keyboard::ModifiersState,
-    // GL textures for each tile (uploaded from Servo offscreen pixels)
     tile_textures: std::collections::HashMap<ViewId, glow::Texture>,
-    session: Option<SessionManager>,
     // Hint mode state
     hint_elements: Vec<HintElement>,
     hint_labels: Vec<String>,
     hint_result_tx: mpsc::Sender<String>,
     hint_result_rx: mpsc::Receiver<String>,
+    // Managers
+    workspace: Option<WorkspaceManager>,
+    history: Option<HistoryManager>,
+    bookmarks: Option<BookmarkManager>,
+    // Suggestion state
+    suggestions: Vec<Suggestion>,
+    suggestion_index: usize,
+    last_search_query: String,
 }
 
 impl App {
     pub fn new(proxy: EventLoopProxy<UserEvent>) -> Self {
+        let config_path = dirs::config_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("orthogonal")
+            .join("config.toml");
+        let config = Config::load(&config_path);
+        let input = InputRouter::with_overrides(&config.keybindings);
         let (hint_result_tx, hint_result_rx) = mpsc::channel();
+
         Self {
             proxy,
+            config,
             window: None,
             engine: None,
             hud: None,
             compositor: None,
             layout: BspLayout::new(Rect::default()),
             views: ViewManager::new(),
-            input: InputRouter::new(),
+            input,
             modifiers: winit::keyboard::ModifiersState::empty(),
             tile_textures: std::collections::HashMap::new(),
-            session: None,
             hint_elements: Vec::new(),
             hint_labels: Vec::new(),
             hint_result_tx,
             hint_result_rx,
+            workspace: None,
+            history: None,
+            bookmarks: None,
+            suggestions: Vec::new(),
+            suggestion_index: 0,
+            last_search_query: String::new(),
         }
     }
 
@@ -128,12 +152,29 @@ impl App {
                         }
                     }
                 }
-                Action::Navigate(url) => {
+                Action::Navigate(input) => {
+                    let url = if !self.suggestions.is_empty() && self.suggestion_index < self.suggestions.len() {
+                        self.suggestions[self.suggestion_index].url.clone()
+                    } else if input.contains('.') || input.starts_with("http") {
+                        if input.starts_with("http://") || input.starts_with("https://") {
+                            input.clone()
+                        } else {
+                            format!("https://{}", input)
+                        }
+                    } else {
+                        self.config.search_url(&input)
+                    };
+
                     if let Some(focused) = self.layout.focused() {
                         if let Some(engine) = &self.engine {
                             engine.navigate(focused, &url);
                         }
+                        if let Some(view) = self.views.get_mut(focused) {
+                            view.url = url;
+                        }
                     }
+                    self.suggestions.clear();
+                    self.suggestion_index = 0;
                     self.update_hud();
                 }
                 Action::Back => {
@@ -200,30 +241,113 @@ impl App {
                     self.update_hud();
                 }
                 Action::EnterSearch => {
+                    if let Some(hud) = &self.hud {
+                        hud.set_search_visible(true);
+                        hud.set_search_text("");
+                        hud.request_redraw();
+                    }
                     self.update_hud();
                 }
-                Action::SearchQueryChanged(_query) => {
+                Action::SearchQueryChanged(query) => {
+                    self.last_search_query = query.clone();
+                    if let Some(hud) = &self.hud {
+                        hud.set_search_text(&query);
+                        hud.request_redraw();
+                    }
                     self.update_hud();
                 }
-                Action::SearchNext | Action::SearchPrev | Action::SearchClear => {
+                Action::SearchNext => {
+                    // JS injection would go here when Servo is available
+                    log::debug!("Search next for: {}", self.last_search_query);
+                }
+                Action::SearchPrev => {
+                    log::debug!("Search prev for: {}", self.last_search_query);
+                }
+                Action::SearchClear => {
+                    self.last_search_query.clear();
+                    if let Some(hud) = &self.hud {
+                        hud.set_search_visible(false);
+                        hud.request_redraw();
+                    }
                     self.update_hud();
                 }
                 Action::SaveSession => {
-                    if let Some(session) = &self.session {
+                    if let Some(workspace) = &mut self.workspace {
                         let (nodes, focused) = self.layout.serialize();
                         let tiles = self.collect_tile_rows();
-                        if let Err(e) = session.save("manual", &nodes, &tiles, focused) {
-                            log::error!("Failed to save session: {}", e);
+                        if let Err(e) = workspace.save_active(&nodes, &tiles, focused) {
+                            log::error!("Failed to save: {}", e);
                         } else {
                             log::info!("Session saved");
                         }
                     }
                 }
                 Action::RestoreSession => {
-                    if let Some(session) = &self.session {
-                        match session.restore("manual") {
-                            Ok(Some((nodes, tiles, focused))) => {
-                                // Tear down current tiles
+                    // Use workspace switch for restore
+                    self.dispatch_actions(vec![Action::WorkspaceSwitch("default".to_string())]);
+                }
+                Action::Quit => {
+                    self.autosave();
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                }
+                Action::Bookmark(tags) => {
+                    if let Some(bookmarks) = &self.bookmarks {
+                        if let Some(focused) = self.layout.focused() {
+                            if let Some(view) = self.views.get(focused) {
+                                let tags_str = tags.as_deref().unwrap_or("");
+                                let _ = bookmarks.add(&view.url, &view.title, tags_str);
+                                log::info!("Bookmarked: {}", view.url);
+                            }
+                        }
+                    }
+                }
+                Action::BookmarkDelete(url) => {
+                    if let Some(bookmarks) = &self.bookmarks {
+                        let _ = bookmarks.remove(&url);
+                    }
+                }
+                Action::ShowBookmarks(query) => {
+                    if let Some(bookmarks) = &self.bookmarks {
+                        let _results = bookmarks.search(&query, 20).unwrap_or_default();
+                        log::info!("Bookmarks search: {} results", _results.len());
+                    }
+                }
+                Action::ShowHistory(query) => {
+                    if let Some(history) = &self.history {
+                        let _results = history.search(&query, 20).unwrap_or_default();
+                        log::info!("History search: {} results", _results.len());
+                    }
+                }
+                Action::CommandBufferChanged => {
+                    self.update_suggestions();
+                    self.update_hud();
+                }
+                Action::SuggestionNext => {
+                    if !self.suggestions.is_empty() {
+                        self.suggestion_index = (self.suggestion_index + 1) % self.suggestions.len();
+                        self.update_suggestion_display();
+                    }
+                }
+                Action::SuggestionPrev => {
+                    if !self.suggestions.is_empty() {
+                        self.suggestion_index = if self.suggestion_index == 0 {
+                            self.suggestions.len() - 1
+                        } else {
+                            self.suggestion_index - 1
+                        };
+                        self.update_suggestion_display();
+                    }
+                }
+                Action::WorkspaceSwitch(name) => {
+                    if let Some(workspace) = &mut self.workspace {
+                        let (current_nodes, current_focused) = self.layout.serialize();
+                        let current_tiles = self.collect_tile_rows();
+
+                        match workspace.switch_to(&name, &current_nodes, &current_tiles, current_focused) {
+                            Ok(Some(state)) => {
+                                // Tear down current
                                 for view_id in self.views.all_views() {
                                     if let Some(engine) = &mut self.engine {
                                         engine.destroy_tile(view_id);
@@ -232,37 +356,139 @@ impl App {
                                 }
                                 self.views = ViewManager::new();
 
-                                // Rebuild layout from saved state
-                                self.layout = BspLayout::deserialize(
-                                    self.layout_viewport(),
-                                    &nodes,
-                                    focused,
-                                );
-
-                                // Recreate views and engine tiles
-                                for tile in &tiles {
+                                // Restore workspace
+                                self.layout = BspLayout::deserialize(self.layout_viewport(), &state.nodes, state.focused);
+                                for tile in &state.tiles {
                                     self.views.create_with_id(tile.view_id, &tile.url);
                                     if let Some(engine) = &mut self.engine {
                                         engine.create_tile(tile.view_id, &tile.url);
                                     }
                                 }
-
                                 self.update_hud();
                                 self.request_redraw();
-                                log::info!("Session restored");
                             }
-                            Ok(None) => log::info!("No session to restore"),
-                            Err(e) => log::error!("Failed to restore session: {}", e),
+                            Ok(None) => {
+                                // New empty workspace
+                                for view_id in self.views.all_views() {
+                                    if let Some(engine) = &mut self.engine {
+                                        engine.destroy_tile(view_id);
+                                    }
+                                    self.tile_textures.remove(&view_id);
+                                }
+                                self.views = ViewManager::new();
+                                self.layout = BspLayout::new(self.layout_viewport());
+
+                                let startup_url = self.config.general.startup_url.clone();
+                                let view_id = self.views.create(&startup_url);
+                                self.layout.add_first_view(view_id);
+                                if let Some(engine) = &mut self.engine {
+                                    engine.create_tile(view_id, &startup_url);
+                                }
+                                self.update_hud();
+                                self.request_redraw();
+                            }
+                            Err(e) => log::error!("Failed to switch workspace: {}", e),
                         }
                     }
                 }
-                Action::Quit => {
-                    self.autosave();
-                    if let Some(window) = &self.window {
-                        window.request_redraw();
+                Action::WorkspaceNew(name) => {
+                    // WorkspaceSwitch handles creating new workspaces
+                    self.dispatch_actions(vec![Action::WorkspaceSwitch(name)]);
+                }
+                Action::WorkspaceDelete(name) => {
+                    if let Some(workspace) = &mut self.workspace {
+                        match workspace.delete(&name) {
+                            Ok(true) => log::info!("Deleted workspace: {}", name),
+                            Ok(false) => log::warn!("Cannot delete active workspace"),
+                            Err(e) => log::error!("Failed to delete workspace: {}", e),
+                        }
+                    }
+                }
+                Action::WorkspaceList => {
+                    if let Some(workspace) = &self.workspace {
+                        if let Ok(list) = workspace.list() {
+                            for info in &list {
+                                log::info!("  {} ({} tiles)", info.name, info.tile_count);
+                            }
+                        }
                     }
                 }
             }
+        }
+    }
+
+    fn update_suggestions(&mut self) {
+        if let Mode::Command { buffer } = self.input.mode() {
+            let trimmed = buffer.trim();
+            if let Some(query) = trimmed.strip_prefix("open ").or_else(|| trimmed.strip_prefix("o ")) {
+                if query.is_empty() {
+                    self.suggestions.clear();
+                    self.suggestion_index = 0;
+                } else {
+                    let mut all = Vec::new();
+
+                    if let Some(bm) = &self.bookmarks {
+                        if let Ok(bookmarks) = bm.search(query, 10) {
+                            for b in bookmarks {
+                                let url_score = suggest::score(query, &b.url);
+                                let title_score = suggest::score(query, &b.title);
+                                all.push(Suggestion {
+                                    url: b.url,
+                                    title: b.title,
+                                    source: SuggestionSource::Bookmark,
+                                    score: url_score.max(title_score),
+                                });
+                            }
+                        }
+                    }
+
+                    if let Some(hm) = &self.history {
+                        if let Ok(entries) = hm.search(query, 10) {
+                            for h in entries {
+                                if all.iter().any(|s| s.url == h.url) {
+                                    continue;
+                                }
+                                let url_score = suggest::score(query, &h.url);
+                                let title_score = suggest::score(query, &h.title);
+                                all.push(Suggestion {
+                                    url: h.url,
+                                    title: h.title,
+                                    source: SuggestionSource::History,
+                                    score: url_score.max(title_score),
+                                });
+                            }
+                        }
+                    }
+
+                    self.suggestions = suggest::rank_suggestions(all, 10);
+                    self.suggestion_index = 0;
+                }
+            } else {
+                self.suggestions.clear();
+                self.suggestion_index = 0;
+            }
+        } else {
+            self.suggestions.clear();
+            self.suggestion_index = 0;
+        }
+
+        self.update_suggestion_display();
+    }
+
+    fn update_suggestion_display(&self) {
+        if let Some(hud) = &self.hud {
+            if self.suggestions.is_empty() {
+                hud.set_suggestions_visible(false);
+            } else {
+                let items: Vec<(String, String, bool)> = self.suggestions
+                    .iter()
+                    .enumerate()
+                    .map(|(i, s)| (s.title.clone(), s.url.clone(), i == self.suggestion_index))
+                    .collect();
+                hud.set_suggestions(items);
+                hud.set_suggestions_visible(true);
+            }
+            hud.request_redraw();
         }
     }
 
@@ -327,8 +553,12 @@ impl App {
             match event {
                 MetadataEvent::UrlChanged { view_id, url } => {
                     if let Some(view) = self.views.get_mut(view_id) {
-                        view.url = url;
+                        view.url = url.clone();
                         needs_hud_update = true;
+                    }
+                    if let Some(history) = &self.history {
+                        let title = self.views.get(view_id).map(|v| v.title.as_str()).unwrap_or("");
+                        let _ = history.record_visit(&url, title);
                     }
                 }
                 MetadataEvent::TitleChanged { view_id, title } => {
@@ -390,11 +620,11 @@ impl App {
         }).collect()
     }
 
-    fn autosave(&self) {
-        if let Some(session) = &self.session {
+    fn autosave(&mut self) {
+        if let Some(workspace) = &mut self.workspace {
             let (nodes, focused) = self.layout.serialize();
             let tiles = self.collect_tile_rows();
-            if let Err(e) = session.autosave(&nodes, &tiles, focused) {
+            if let Err(e) = workspace.save_active(&nodes, &tiles, focused) {
                 log::error!("Autosave failed: {}", e);
             }
         }
@@ -486,25 +716,49 @@ impl ApplicationHandler<UserEvent> for App {
         // Initialize layout
         self.layout = BspLayout::new(Rect::new(0.0, 0.0, size.width as f32, size.height as f32));
 
-        // Initialize session manager
+        // Open database and initialize managers
         let db_path = dirs::data_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join("orthogonal")
-            .join("sessions.db");
+            .join("orthogonal.db");
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).ok();
         }
-        match db::open_database(&db_path) {
-            Ok(conn) => {
-                self.session = Some(SessionManager::new(conn));
+
+        let mut restored = false;
+        if let Ok(conn) = db::open_database(&db_path) {
+            self.history = Some(HistoryManager::new(conn.clone(), self.config.history.max_entries));
+            self.bookmarks = Some(BookmarkManager::new(conn.clone()));
+            let mut wm = WorkspaceManager::new(conn);
+
+            // Try to restore last workspace
+            if self.config.general.restore_workspace_on_startup {
+                if let Ok(Some(state)) = wm.switch_to("default", &[], &[], None) {
+                    if !state.tiles.is_empty() {
+                        self.layout = BspLayout::deserialize(
+                            Rect::new(0.0, 0.0, size.width as f32, size.height as f32),
+                            &state.nodes,
+                            state.focused,
+                        );
+                        for tile in &state.tiles {
+                            self.views.create_with_id(tile.view_id, &tile.url);
+                            engine.create_tile(tile.view_id, &tile.url);
+                        }
+                        restored = true;
+                    }
+                }
+                wm.set_active("default");
             }
-            Err(e) => log::error!("Failed to open database: {}", e),
+
+            self.workspace = Some(wm);
         }
 
-        // Create first tile
-        let view_id = self.views.create("https://servo.org");
-        self.layout.add_first_view(view_id);
-        engine.create_tile(view_id, "https://servo.org");
+        if !restored {
+            let startup_url = &self.config.general.startup_url.clone();
+            let view_id = self.views.create(startup_url);
+            self.layout.add_first_view(view_id);
+            engine.create_tile(view_id, startup_url);
+        }
 
         // Initialize compositor
         let gl = engine.gl_context();
