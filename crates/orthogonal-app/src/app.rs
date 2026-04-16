@@ -1,3 +1,4 @@
+use std::sync::mpsc;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
@@ -47,10 +48,13 @@ pub struct App {
     // Hint mode state
     hint_elements: Vec<HintElement>,
     hint_labels: Vec<String>,
+    hint_result_tx: mpsc::Sender<String>,
+    hint_result_rx: mpsc::Receiver<String>,
 }
 
 impl App {
     pub fn new(proxy: EventLoopProxy<UserEvent>) -> Self {
+        let (hint_result_tx, hint_result_rx) = mpsc::channel();
         Self {
             proxy,
             window: None,
@@ -64,6 +68,8 @@ impl App {
             tile_textures: std::collections::HashMap::new(),
             hint_elements: Vec::new(),
             hint_labels: Vec::new(),
+            hint_result_tx,
+            hint_result_rx,
         }
     }
 
@@ -153,11 +159,14 @@ impl App {
                 Action::EnterHintMode => {
                     if let Some(focused) = self.layout.focused() {
                         if let Some(engine) = &self.engine {
+                            let tx = self.hint_result_tx.clone();
                             engine.evaluate_js(
                                 focused,
                                 hint::HINT_QUERY_SCRIPT,
-                                Box::new(|result| {
-                                    log::debug!("Hint query result: {:?}", result);
+                                Box::new(move |result| {
+                                    if let Ok(json) = result {
+                                        let _ = tx.send(json);
+                                    }
                                 }),
                             );
                         }
@@ -275,6 +284,24 @@ impl App {
         }
         if needs_hud_update {
             self.update_hud();
+        }
+    }
+
+    fn process_hint_results(&mut self) {
+        while let Ok(json) = self.hint_result_rx.try_recv() {
+            match hint::parse_hint_elements(&json) {
+                Ok(elements) => {
+                    let labels = hint::generate_labels(elements.len());
+                    self.hint_labels = labels.clone();
+                    self.hint_elements = elements;
+                    self.input.enter_hint_mode(labels);
+                    self.update_hud();
+                    self.update_hint_display();
+                }
+                Err(e) => {
+                    log::warn!("Failed to parse hint elements: {}", e);
+                }
+            }
         }
     }
 
@@ -467,6 +494,7 @@ impl ApplicationHandler<UserEvent> for App {
                     engine.spin();
                 }
                 self.process_metadata_events();
+                self.process_hint_results();
                 self.request_redraw();
             }
         }
