@@ -6,6 +6,7 @@ use winit::window::{Window, WindowAttributes, WindowId};
 use glow::HasContext;
 
 use orthogonal_core::compositor::Compositor;
+use orthogonal_core::db;
 use orthogonal_core::hint;
 use orthogonal_core::hud::Hud;
 use orthogonal_core::input::{Action, InputRouter, Mode};
@@ -483,9 +484,11 @@ impl ApplicationHandler<UserEvent> for App {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).ok();
         }
-        match SessionManager::open(&db_path) {
-            Ok(sm) => self.session = Some(sm),
-            Err(e) => log::error!("Failed to open session database: {}", e),
+        match db::open_database(&db_path) {
+            Ok(conn) => {
+                self.session = Some(SessionManager::new(conn));
+            }
+            Err(e) => log::error!("Failed to open database: {}", e),
         }
 
         // Create first tile
