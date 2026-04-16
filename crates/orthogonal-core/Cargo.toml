@@ -9,6 +9,7 @@ slint = "1"
 glow = "0.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "0.8"
 dirs = "6"
 log = { workspace = true }
 
