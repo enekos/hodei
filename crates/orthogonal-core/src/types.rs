@@ -62,7 +62,7 @@ pub struct Modifiers {
     pub meta: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CoreKey {
     Char(char),
     Escape,

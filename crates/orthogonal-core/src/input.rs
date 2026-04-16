@@ -1,4 +1,69 @@
 use crate::types::*;
+use std::collections::HashMap;
+
+// === KeyCombo ===
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct KeyCombo {
+    pub key: CoreKey,
+    pub ctrl: bool,
+    pub shift: bool,
+}
+
+impl KeyCombo {
+    pub fn new(key: CoreKey, ctrl: bool, shift: bool) -> Self {
+        Self { key, ctrl, shift }
+    }
+
+    pub fn from_event(event: &CoreKeyEvent) -> Self {
+        let shift = match event.key {
+            // If key is already uppercase, shift is implicit — don't include it in the combo
+            CoreKey::Char(c) if c.is_uppercase() => false,
+            _ => event.modifiers.shift,
+        };
+        Self {
+            key: event.key,
+            ctrl: event.modifiers.ctrl,
+            shift,
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        let parts: Vec<&str> = s.split('+').collect();
+        let mut ctrl = false;
+        let mut shift = false;
+
+        for &part in &parts[..parts.len() - 1] {
+            match part.to_lowercase().as_str() {
+                "ctrl" => ctrl = true,
+                "shift" => shift = true,
+                _ => return None,
+            }
+        }
+
+        let key_str = parts.last()?;
+        let key = match *key_str {
+            "escape" | "esc" => CoreKey::Escape,
+            "enter" => CoreKey::Enter,
+            "backspace" => CoreKey::Backspace,
+            "tab" => CoreKey::Tab,
+            "left" => CoreKey::Left,
+            "right" => CoreKey::Right,
+            "up" => CoreKey::Up,
+            "down" => CoreKey::Down,
+            s if s.len() == 1 => {
+                let ch = s.chars().next()?;
+                if ch.is_uppercase() {
+                    shift = true;
+                }
+                CoreKey::Char(ch)
+            }
+            _ => return None,
+        };
+
+        Some(Self { key, ctrl, shift })
+    }
+}
 
 // === Modes ===
 
@@ -51,11 +116,80 @@ pub enum Action {
 
 pub struct InputRouter {
     mode: Mode,
+    normal_bindings: HashMap<KeyCombo, Action>,
 }
 
 impl InputRouter {
     pub fn new() -> Self {
-        Self { mode: Mode::Normal }
+        Self {
+            mode: Mode::Normal,
+            normal_bindings: Self::default_bindings(),
+        }
+    }
+
+    pub fn with_overrides(overrides: &HashMap<String, String>) -> Self {
+        let mut bindings = Self::default_bindings();
+        for (action_name, key_str) in overrides {
+            if let Some(combo) = KeyCombo::parse(key_str) {
+                if let Some(action) = Self::action_from_name(action_name) {
+                    bindings.retain(|_, v| v != &action);
+                    bindings.insert(combo, action);
+                }
+            }
+        }
+        Self {
+            mode: Mode::Normal,
+            normal_bindings: bindings,
+        }
+    }
+
+    fn default_bindings() -> HashMap<KeyCombo, Action> {
+        let mut map = HashMap::new();
+        map.insert(KeyCombo::new(CoreKey::Char('i'), false, false), Action::EnterInsert);
+        map.insert(KeyCombo::new(CoreKey::Char(':'), false, false), Action::EnterCommand);
+        map.insert(KeyCombo::new(CoreKey::Char('f'), false, false), Action::EnterHintMode);
+        map.insert(KeyCombo::new(CoreKey::Char('/'), false, false), Action::EnterSearch);
+        map.insert(KeyCombo::new(CoreKey::Char('h'), false, false), Action::FocusNeighbor(Direction::Left));
+        map.insert(KeyCombo::new(CoreKey::Char('j'), false, false), Action::FocusNeighbor(Direction::Down));
+        map.insert(KeyCombo::new(CoreKey::Char('k'), false, false), Action::FocusNeighbor(Direction::Up));
+        map.insert(KeyCombo::new(CoreKey::Char('l'), false, false), Action::FocusNeighbor(Direction::Right));
+        map.insert(KeyCombo::new(CoreKey::Char('H'), false, false), Action::ResizeSplit(Direction::Left, 0.05));
+        map.insert(KeyCombo::new(CoreKey::Char('J'), false, false), Action::ResizeSplit(Direction::Down, 0.05));
+        map.insert(KeyCombo::new(CoreKey::Char('K'), false, false), Action::ResizeSplit(Direction::Up, 0.05));
+        map.insert(KeyCombo::new(CoreKey::Char('L'), false, false), Action::ResizeSplit(Direction::Right, 0.05));
+        map.insert(KeyCombo::new(CoreKey::Char('v'), true, false), Action::SplitView(SplitDirection::Vertical));
+        map.insert(KeyCombo::new(CoreKey::Char('s'), true, false), Action::SplitView(SplitDirection::Horizontal));
+        map.insert(KeyCombo::new(CoreKey::Char('q'), false, false), Action::CloseView);
+        map.insert(KeyCombo::new(CoreKey::Char('r'), false, false), Action::Reload);
+        map.insert(KeyCombo::new(CoreKey::Char('b'), true, false), Action::Back);
+        map.insert(KeyCombo::new(CoreKey::Char('f'), true, false), Action::Forward);
+        map.insert(KeyCombo::new(CoreKey::Char('n'), false, false), Action::SearchNext);
+        map.insert(KeyCombo::new(CoreKey::Char('N'), false, false), Action::SearchPrev);
+        map.insert(KeyCombo::new(CoreKey::Char('B'), false, false), Action::ShowBookmarks(String::new()));
+        map
+    }
+
+    fn action_from_name(name: &str) -> Option<Action> {
+        match name {
+            "focus_left" => Some(Action::FocusNeighbor(Direction::Left)),
+            "focus_down" => Some(Action::FocusNeighbor(Direction::Down)),
+            "focus_up" => Some(Action::FocusNeighbor(Direction::Up)),
+            "focus_right" => Some(Action::FocusNeighbor(Direction::Right)),
+            "split_vertical" => Some(Action::SplitView(SplitDirection::Vertical)),
+            "split_horizontal" => Some(Action::SplitView(SplitDirection::Horizontal)),
+            "close" => Some(Action::CloseView),
+            "reload" => Some(Action::Reload),
+            "back" => Some(Action::Back),
+            "forward" => Some(Action::Forward),
+            "insert" => Some(Action::EnterInsert),
+            "command" => Some(Action::EnterCommand),
+            "hints" => Some(Action::EnterHintMode),
+            "search" => Some(Action::EnterSearch),
+            "search_next" => Some(Action::SearchNext),
+            "search_prev" => Some(Action::SearchPrev),
+            "bookmarks" => Some(Action::ShowBookmarks(String::new())),
+            _ => None,
+        }
     }
 
     pub fn mode(&self) -> &Mode {
@@ -81,41 +215,18 @@ impl InputRouter {
     }
 
     fn handle_normal(&mut self, event: &CoreKeyEvent) -> Vec<Action> {
-        let m = &event.modifiers;
-        match event.key {
-            CoreKey::Char('i') if !m.ctrl => {
-                self.mode = Mode::Insert;
-                vec![Action::EnterInsert]
+        let combo = KeyCombo::from_event(event);
+        if let Some(action) = self.normal_bindings.get(&combo) {
+            let action = action.clone();
+            match &action {
+                Action::EnterInsert => self.mode = Mode::Insert,
+                Action::EnterCommand => self.mode = Mode::Command { buffer: String::new() },
+                Action::EnterSearch => self.mode = Mode::Search { query: String::new() },
+                _ => {}
             }
-            CoreKey::Char(':') if !m.ctrl => {
-                self.mode = Mode::Command { buffer: String::new() };
-                vec![Action::EnterCommand]
-            }
-            CoreKey::Char('f') if !m.ctrl => {
-                vec![Action::EnterHintMode]
-            }
-            CoreKey::Char('h') if !m.ctrl && !m.shift => vec![Action::FocusNeighbor(Direction::Left)],
-            CoreKey::Char('j') if !m.ctrl && !m.shift => vec![Action::FocusNeighbor(Direction::Down)],
-            CoreKey::Char('k') if !m.ctrl && !m.shift => vec![Action::FocusNeighbor(Direction::Up)],
-            CoreKey::Char('l') if !m.ctrl && !m.shift => vec![Action::FocusNeighbor(Direction::Right)],
-            CoreKey::Char('H') if !m.ctrl => vec![Action::ResizeSplit(Direction::Left, 0.05)],
-            CoreKey::Char('J') if !m.ctrl => vec![Action::ResizeSplit(Direction::Down, 0.05)],
-            CoreKey::Char('K') if !m.ctrl => vec![Action::ResizeSplit(Direction::Up, 0.05)],
-            CoreKey::Char('L') if !m.ctrl => vec![Action::ResizeSplit(Direction::Right, 0.05)],
-            CoreKey::Char('v') if m.ctrl => vec![Action::SplitView(SplitDirection::Vertical)],
-            CoreKey::Char('s') if m.ctrl => vec![Action::SplitView(SplitDirection::Horizontal)],
-            CoreKey::Char('q') if !m.ctrl => vec![Action::CloseView],
-            CoreKey::Char('r') if !m.ctrl => vec![Action::Reload],
-            CoreKey::Char('b') if m.ctrl => vec![Action::Back],
-            CoreKey::Char('f') if m.ctrl => vec![Action::Forward],
-            CoreKey::Char('B') if !m.ctrl => vec![Action::ShowBookmarks(String::new())],
-            CoreKey::Char('/') if !m.ctrl => {
-                self.mode = Mode::Search { query: String::new() };
-                vec![Action::EnterSearch]
-            }
-            CoreKey::Char('n') if !m.ctrl && !m.shift => vec![Action::SearchNext],
-            CoreKey::Char('N') if !m.ctrl => vec![Action::SearchPrev],
-            _ => vec![],
+            vec![action]
+        } else {
+            vec![]
         }
     }
 
@@ -582,5 +693,30 @@ mod tests {
         };
         let actions = router.handle(&event);
         assert_eq!(actions, vec![Action::SearchPrev]);
+    }
+
+    #[test]
+    fn custom_keybinding_overrides_default() {
+        let mut overrides = std::collections::HashMap::new();
+        overrides.insert("focus_left".to_string(), "a".to_string());
+        let mut router = InputRouter::with_overrides(&overrides);
+        let actions = router.handle(&key('a'));
+        assert_eq!(actions, vec![Action::FocusNeighbor(Direction::Left)]);
+        let actions = router.handle(&key('h'));
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn keycombo_parse_simple() {
+        let combo = KeyCombo::parse("h").unwrap();
+        assert_eq!(combo.key, CoreKey::Char('h'));
+        assert!(!combo.ctrl);
+    }
+
+    #[test]
+    fn keycombo_parse_ctrl() {
+        let combo = KeyCombo::parse("ctrl+v").unwrap();
+        assert_eq!(combo.key, CoreKey::Char('v'));
+        assert!(combo.ctrl);
     }
 }
