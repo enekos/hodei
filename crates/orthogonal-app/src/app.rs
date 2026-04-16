@@ -199,6 +199,15 @@ impl App {
                 Action::EnterInsert | Action::EnterCommand | Action::ExitToNormal => {
                     self.update_hud();
                 }
+                Action::EnterSearch => {
+                    self.update_hud();
+                }
+                Action::SearchQueryChanged(_query) => {
+                    self.update_hud();
+                }
+                Action::SearchNext | Action::SearchPrev | Action::SearchClear => {
+                    self.update_hud();
+                }
                 Action::SaveSession => {
                     if let Some(session) = &self.session {
                         let (nodes, focused) = self.layout.serialize();
@@ -264,6 +273,7 @@ impl App {
                 Mode::Insert => "INSERT",
                 Mode::Command { .. } => "COMMAND",
                 Mode::Hint { .. } => "HINT",
+                Mode::Search { .. } => "SEARCH",
             };
             hud.set_mode_text(mode_str);
 

@@ -8,6 +8,7 @@ pub enum Mode {
     Insert,
     Command { buffer: String },
     Hint { filter: String, labels: Vec<String> },
+    Search { query: String },
 }
 
 // === Actions ===
@@ -39,6 +40,11 @@ pub enum Action {
     SuggestionNext,
     SuggestionPrev,
     CommandBufferChanged,
+    EnterSearch,
+    SearchQueryChanged(String),
+    SearchNext,
+    SearchPrev,
+    SearchClear,
 }
 
 // === Router ===
@@ -65,6 +71,7 @@ impl InputRouter {
             Mode::Insert => self.handle_insert(event),
             Mode::Command { .. } => self.handle_command(event),
             Mode::Hint { .. } => self.handle_hint(event),
+            Mode::Search { .. } => self.handle_search(event),
         }
     }
 
@@ -102,6 +109,12 @@ impl InputRouter {
             CoreKey::Char('b') if m.ctrl => vec![Action::Back],
             CoreKey::Char('f') if m.ctrl => vec![Action::Forward],
             CoreKey::Char('B') if !m.ctrl => vec![Action::ShowBookmarks(String::new())],
+            CoreKey::Char('/') if !m.ctrl => {
+                self.mode = Mode::Search { query: String::new() };
+                vec![Action::EnterSearch]
+            }
+            CoreKey::Char('n') if !m.ctrl && !m.shift => vec![Action::SearchNext],
+            CoreKey::Char('N') if !m.ctrl => vec![Action::SearchPrev],
             _ => vec![],
         }
     }
@@ -183,6 +196,41 @@ impl InputRouter {
                     }
                     vec![Action::HintCharTyped(c)]
                 }
+            }
+            _ => vec![],
+        }
+    }
+
+    fn handle_search(&mut self, event: &CoreKeyEvent) -> Vec<Action> {
+        match event.key {
+            CoreKey::Escape => {
+                self.mode = Mode::Normal;
+                vec![Action::SearchClear]
+            }
+            CoreKey::Enter => {
+                let query = if let Mode::Search { query } = &self.mode {
+                    query.clone()
+                } else {
+                    String::new()
+                };
+                self.mode = Mode::Normal;
+                vec![Action::SearchQueryChanged(query)]
+            }
+            CoreKey::Backspace => {
+                if let Mode::Search { query } = &mut self.mode {
+                    query.pop();
+                    let q = query.clone();
+                    return vec![Action::SearchQueryChanged(q)];
+                }
+                vec![]
+            }
+            CoreKey::Char(c) => {
+                if let Mode::Search { query } = &mut self.mode {
+                    query.push(c);
+                    let q = query.clone();
+                    return vec![Action::SearchQueryChanged(q)];
+                }
+                vec![]
             }
             _ => vec![],
         }
@@ -487,5 +535,52 @@ mod tests {
         } else {
             panic!("not in command mode");
         }
+    }
+
+    #[test]
+    fn slash_enters_search_mode() {
+        let mut router = InputRouter::new();
+        let actions = router.handle(&key('/'));
+        assert_eq!(actions, vec![Action::EnterSearch]);
+        assert!(matches!(router.mode(), Mode::Search { .. }));
+    }
+
+    #[test]
+    fn search_mode_builds_query() {
+        let mut router = InputRouter::new();
+        router.handle(&key('/'));
+        let actions = router.handle(&key('r'));
+        assert_eq!(actions, vec![Action::SearchQueryChanged("r".into())]);
+        let actions = router.handle(&key('u'));
+        assert_eq!(actions, vec![Action::SearchQueryChanged("ru".into())]);
+    }
+
+    #[test]
+    fn search_esc_clears() {
+        let mut router = InputRouter::new();
+        router.handle(&key('/'));
+        router.handle(&key('a'));
+        let actions = router.handle(&special(CoreKey::Escape));
+        assert_eq!(actions, vec![Action::SearchClear]);
+        assert_eq!(*router.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn n_triggers_search_next_in_normal() {
+        let mut router = InputRouter::new();
+        let actions = router.handle(&key('n'));
+        assert_eq!(actions, vec![Action::SearchNext]);
+    }
+
+    #[test]
+    fn shift_n_triggers_search_prev_in_normal() {
+        let mut router = InputRouter::new();
+        let event = CoreKeyEvent {
+            key: CoreKey::Char('N'),
+            state: KeyState::Pressed,
+            modifiers: Modifiers { shift: true, ..Default::default() },
+        };
+        let actions = router.handle(&event);
+        assert_eq!(actions, vec![Action::SearchPrev]);
     }
 }

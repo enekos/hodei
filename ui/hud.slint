@@ -60,7 +60,8 @@ export component HudWindow inherits Window {
                 text: root.mode-text;
                 color: root.mode-text == "NORMAL" ? #00ff88 :
                        root.mode-text == "INSERT" ? #ff8800 :
-                       root.mode-text == "HINT" ? #ff00ff : #ffff00;
+                       root.mode-text == "HINT" ? #ff00ff :
+                       root.mode-text == "SEARCH" ? #00aaff : #ffff00;
                 font-size: 12px;
                 font-weight: 700;
                 horizontal-alignment: right;
