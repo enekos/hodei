@@ -5758,6 +5758,7 @@ checksum = "a86ed3f5f244b372d6b1a00b72ef7f8876d0bc6a78a4c9985c53614041512063"
 name = "orthogonal-app"
 version = "0.1.0"
 dependencies = [
+ "dirs",
  "env_logger",
  "glow",
  "image",

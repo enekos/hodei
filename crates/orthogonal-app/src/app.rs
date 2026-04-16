@@ -10,6 +10,7 @@ use orthogonal_core::hint;
 use orthogonal_core::hud::Hud;
 use orthogonal_core::input::{Action, InputRouter, Mode};
 use orthogonal_core::layout::BspLayout;
+use orthogonal_core::session::SessionManager;
 use orthogonal_core::types::*;
 use orthogonal_core::view::ViewManager;
 use orthogonal_servo::Engine;
@@ -45,6 +46,7 @@ pub struct App {
     modifiers: winit::keyboard::ModifiersState,
     // GL textures for each tile (uploaded from Servo offscreen pixels)
     tile_textures: std::collections::HashMap<ViewId, glow::Texture>,
+    session: Option<SessionManager>,
     // Hint mode state
     hint_elements: Vec<HintElement>,
     hint_labels: Vec<String>,
@@ -66,6 +68,7 @@ impl App {
             input: InputRouter::new(),
             modifiers: winit::keyboard::ModifiersState::empty(),
             tile_textures: std::collections::HashMap::new(),
+            session: None,
             hint_elements: Vec::new(),
             hint_labels: Vec::new(),
             hint_result_tx,
@@ -196,12 +199,55 @@ impl App {
                     self.update_hud();
                 }
                 Action::SaveSession => {
-                    // TODO: wire up session manager
+                    if let Some(session) = &self.session {
+                        let (nodes, focused) = self.layout.serialize();
+                        let tiles = self.collect_tile_rows();
+                        if let Err(e) = session.save("manual", &nodes, &tiles, focused) {
+                            log::error!("Failed to save session: {}", e);
+                        } else {
+                            log::info!("Session saved");
+                        }
+                    }
                 }
                 Action::RestoreSession => {
-                    // TODO: wire up session manager
+                    if let Some(session) = &self.session {
+                        match session.restore("manual") {
+                            Ok(Some((nodes, tiles, focused))) => {
+                                // Tear down current tiles
+                                for view_id in self.views.all_views() {
+                                    if let Some(engine) = &mut self.engine {
+                                        engine.destroy_tile(view_id);
+                                    }
+                                    self.tile_textures.remove(&view_id);
+                                }
+                                self.views = ViewManager::new();
+
+                                // Rebuild layout from saved state
+                                self.layout = BspLayout::deserialize(
+                                    self.layout_viewport(),
+                                    &nodes,
+                                    focused,
+                                );
+
+                                // Recreate views and engine tiles
+                                for tile in &tiles {
+                                    self.views.create_with_id(tile.view_id, &tile.url);
+                                    if let Some(engine) = &mut self.engine {
+                                        engine.create_tile(tile.view_id, &tile.url);
+                                    }
+                                }
+
+                                self.update_hud();
+                                self.request_redraw();
+                                log::info!("Session restored");
+                            }
+                            Ok(None) => log::info!("No session to restore"),
+                            Err(e) => log::error!("Failed to restore session: {}", e),
+                        }
+                    }
                 }
                 Action::Quit => {
+                    self.autosave();
                     if let Some(window) = &self.window {
                         window.request_redraw();
                     }
@@ -311,6 +357,38 @@ impl App {
         }
     }
 
+    fn layout_viewport(&self) -> Rect {
+        self.window
+            .as_ref()
+            .map(|w| {
+                let size = w.inner_size();
+                Rect::new(0.0, 0.0, size.width as f32, size.height as f32)
+            })
+            .unwrap_or_default()
+    }
+
+    fn collect_tile_rows(&self) -> Vec<TileRow> {
+        self.views.all_views().iter().filter_map(|id| {
+            self.views.get(*id).map(|v| TileRow {
+                view_id: v.id,
+                url: v.url.clone(),
+                title: v.title.clone(),
+                scroll_x: 0.0,
+                scroll_y: 0.0,
+            })
+        }).collect()
+    }
+
+    fn autosave(&self) {
+        if let Some(session) = &self.session {
+            let (nodes, focused) = self.layout.serialize();
+            let tiles = self.collect_tile_rows();
+            if let Err(e) = session.autosave(&nodes, &tiles, focused) {
+                log::error!("Autosave failed: {}", e);
+            }
+        }
+    }
+
     fn convert_key_event(&self, event: &winit::event::KeyEvent) -> Option<CoreKeyEvent> {
         use winit::keyboard::{Key, NamedKey};
         let state = match event.state {
@@ -397,6 +475,19 @@ impl ApplicationHandler<UserEvent> for App {
         // Initialize layout
         self.layout = BspLayout::new(Rect::new(0.0, 0.0, size.width as f32, size.height as f32));
 
+        // Initialize session manager
+        let db_path = dirs::data_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("orthogonal")
+            .join("sessions.db");
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        match SessionManager::open(&db_path) {
+            Ok(sm) => self.session = Some(sm),
+            Err(e) => log::error!("Failed to open session database: {}", e),
+        }
+
         // Create first tile
         let view_id = self.views.create("https://servo.org");
         self.layout.add_first_view(view_id);
@@ -415,7 +506,10 @@ impl ApplicationHandler<UserEvent> for App {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                self.autosave();
+                event_loop.exit();
+            }
 
             WindowEvent::KeyboardInput { event, .. } => {
                 if let Some(core_event) = self.convert_key_event(&event) {
