@@ -1,0 +1,150 @@
+/*
+ * Copyright (c) 2024, Shannon Booth <shannon@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#include <LibWeb/Bindings/PointerEventPrototype.h>
+#include <LibWeb/HTML/EventNames.h>
+#include <LibWeb/UIEvents/EventNames.h>
+#include <LibWeb/UIEvents/KeyCode.h>
+#include <LibWeb/UIEvents/MouseButton.h>
+#include <LibWeb/UIEvents/PointerEvent.h>
+
+namespace Web::UIEvents {
+
+GC_DEFINE_ALLOCATOR(PointerEvent);
+
+// https://w3c.github.io/pointerevents/#dom-pointerevent-screenx
+// For untrusted PointerEvents, coordinates are floored for click, auxclick, and
+// contextmenu events (via the MouseEvent base class). For all other pointer
+// event types, fractional coordinates are preserved.
+bool PointerEvent::should_have_fractional_coordinates() const
+{
+    if (is_trusted())
+        return true;
+    return type() != HTML::EventNames::click
+        && type() != UIEvents::EventNames::auxclick
+        && type() != HTML::EventNames::contextmenu;
+}
+
+double PointerEvent::screen_x() const { return should_have_fractional_coordinates() ? m_screen_x : MouseEvent::screen_x(); }
+double PointerEvent::screen_y() const { return should_have_fractional_coordinates() ? m_screen_y : MouseEvent::screen_y(); }
+double PointerEvent::page_x() const { return should_have_fractional_coordinates() ? m_page_x : MouseEvent::page_x(); }
+double PointerEvent::page_y() const { return should_have_fractional_coordinates() ? m_page_y : MouseEvent::page_y(); }
+double PointerEvent::client_x() const { return should_have_fractional_coordinates() ? m_client_x : MouseEvent::client_x(); }
+double PointerEvent::client_y() const { return should_have_fractional_coordinates() ? m_client_y : MouseEvent::client_y(); }
+double PointerEvent::offset_x() const { return should_have_fractional_coordinates() ? m_offset_x : MouseEvent::offset_x(); }
+double PointerEvent::offset_y() const { return should_have_fractional_coordinates() ? m_offset_y : MouseEvent::offset_y(); }
+
+WebIDL::ExceptionOr<GC::Ref<PointerEvent>> PointerEvent::create_from_platform_event(JS::Realm& realm, GC::Ptr<HTML::WindowProxy> window_proxy, FlyString const& event_name, CSSPixelPoint screen, CSSPixelPoint page, CSSPixelPoint client, CSSPixelPoint offset, Optional<CSSPixelPoint> movement, unsigned button, unsigned buttons, unsigned modifiers)
+{
+    PointerEventInit event_init {};
+    event_init.ctrl_key = modifiers & Mod_Ctrl;
+    event_init.shift_key = modifiers & Mod_Shift;
+    event_init.alt_key = modifiers & Mod_Alt;
+    event_init.meta_key = modifiers & Mod_Super;
+    event_init.screen_x = screen.x().to_double();
+    event_init.screen_y = screen.y().to_double();
+    event_init.client_x = client.x().to_double();
+    event_init.client_y = client.y().to_double();
+    event_init.view = window_proxy;
+    if (movement.has_value()) {
+        event_init.movement_x = movement.value().x().to_double();
+        event_init.movement_y = movement.value().y().to_double();
+    }
+    event_init.button = mouse_button_to_button_code(static_cast<MouseButton>(button));
+    event_init.buttons = buttons;
+    auto event = PointerEvent::create(realm, event_name, event_init, page.x().to_double(), page.y().to_double(), offset.x().to_double(), offset.y().to_double());
+    event->set_is_trusted(true);
+    event->set_bubbles(true);
+    event->set_cancelable(true);
+    event->set_composed(true);
+    return event;
+}
+
+PointerEvent::PointerEvent(JS::Realm& realm, FlyString const& type, PointerEventInit const& event_init, double page_x, double page_y, double offset_x, double offset_y)
+    : MouseEvent(realm, type, event_init, page_x, page_y, offset_x, offset_y)
+    , m_pointer_id(event_init.pointer_id)
+    , m_width(event_init.width)
+    , m_height(event_init.height)
+    , m_pressure(event_init.pressure)
+    , m_tangential_pressure(event_init.tangential_pressure)
+    , m_tilt_x(event_init.tilt_x.value_or(0))
+    , m_tilt_y(event_init.tilt_y.value_or(0))
+    , m_twist(event_init.twist)
+    , m_altitude_angle(event_init.altitude_angle.value_or(DEFAULT_ALTITUDE_ANGLE))
+    , m_azimuth_angle(event_init.azimuth_angle.value_or(0))
+    , m_pointer_type(event_init.pointer_type)
+    , m_is_primary(event_init.is_primary)
+    , m_persistent_device_id(event_init.persistent_device_id)
+{
+    m_coalesced_events.ensure_capacity(event_init.coalesced_events.size());
+    for (auto const& coalesced_event : event_init.coalesced_events)
+        m_coalesced_events.unchecked_append(*coalesced_event);
+
+    m_predicted_events.ensure_capacity(event_init.predicted_events.size());
+    for (auto const& predicted_event : event_init.predicted_events)
+        m_predicted_events.unchecked_append(*predicted_event);
+}
+
+PointerEvent::~PointerEvent() = default;
+
+void PointerEvent::initialize(JS::Realm& realm)
+{
+    WEB_SET_PROTOTYPE_FOR_INTERFACE(PointerEvent);
+    Base::initialize(realm);
+}
+
+void PointerEvent::visit_edges(Cell::Visitor& visitor)
+{
+    Base::visit_edges(visitor);
+    visitor.visit(m_coalesced_events);
+    visitor.visit(m_predicted_events);
+}
+
+GC::Ref<MouseEvent> PointerEvent::clone() const
+{
+    PointerEventInit init {};
+    init.screen_x = screen_x();
+    init.screen_y = screen_y();
+    init.client_x = client_x();
+    init.client_y = client_y();
+    init.movement_x = movement_x();
+    init.movement_y = movement_y();
+    init.button = button();
+    init.buttons = buttons();
+    init.related_target = related_target();
+    init.ctrl_key = ctrl_key();
+    init.shift_key = shift_key();
+    init.alt_key = alt_key();
+    init.meta_key = meta_key();
+    init.view = view();
+    init.detail = detail();
+    init.pointer_id = m_pointer_id;
+    init.width = m_width;
+    init.height = m_height;
+    init.pressure = m_pressure;
+    init.tangential_pressure = m_tangential_pressure;
+    init.tilt_x = m_tilt_x;
+    init.tilt_y = m_tilt_y;
+    init.twist = m_twist;
+    init.altitude_angle = m_altitude_angle;
+    init.azimuth_angle = m_azimuth_angle;
+    init.pointer_type = m_pointer_type;
+    init.is_primary = m_is_primary;
+    init.persistent_device_id = m_persistent_device_id;
+    return create(realm(), type(), init, page_x(), page_y(), offset_x(), offset_y());
+}
+
+GC::Ref<PointerEvent> PointerEvent::create(JS::Realm& realm, FlyString const& type, PointerEventInit const& event_init, double page_x, double page_y, double offset_x, double offset_y)
+{
+    return realm.create<PointerEvent>(realm, type, event_init, page_x, page_y, offset_x, offset_y);
+}
+
+WebIDL::ExceptionOr<GC::Ref<PointerEvent>> PointerEvent::construct_impl(JS::Realm& realm, FlyString const& type, PointerEventInit const& event_init)
+{
+    return create(realm, type, event_init, event_init.client_x, event_init.client_y, event_init.client_x, event_init.client_y);
+}
+
+}

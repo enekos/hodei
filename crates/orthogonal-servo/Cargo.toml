@@ -1,0 +1,16 @@
+[package]
+name = "orthogonal-servo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+orthogonal-core = { path = "../orthogonal-core" }
+servo = { path = "../../servo/components/servo" }
+url = "2"
+log = "0.4"
+image = "0.25"
+glow = "0.17"
+raw-window-handle = "0.6"
+dpi = "0.1"
+
+[workspace]

@@ -1,0 +1,44 @@
+Harness status: OK
+
+Found 38 tests
+
+35 Pass
+3 Fail
+Pass	el-a
+Pass	el-aside
+Pass	el-aside-in-main
+Pass	el-aside-in-article-in-main-with-name
+Pass	el-aside-in-article-with-name
+Pass	el-aside-in-aside-with-name
+Pass	el-aside-in-nav-with-name
+Pass	el-aside-in-nav-with-role
+Pass	el-aside-in-section-with-name
+Pass	el-aside-in-section-aria-labelledby
+Pass	el-aside-in-section-title
+Pass	el-footer-ancestorbody
+Pass	el-header-ancestorbody
+Fail	el-img-no-name
+Fail	el-img-empty-alt-aria-label
+Fail	el-img-empty-alt-aria-labelledby
+Pass	el-section
+Pass	el-section-aria-labelledby
+Pass	el-section-title
+Pass	el-a-no-href
+Pass	el-aside-in-article-in-main
+Pass	el-aside-in-article
+Pass	el-aside-in-aside
+Pass	el-aside-in-nav
+Pass	el-aside-in-section
+Pass	el-aside-in-section-aria-label-empty
+Pass	el-aside-in-section-aria-label-whitespace
+Pass	el-aside-in-section-aria-labelledby-non-existing
+Pass	el-aside-in-section-title-empty
+Pass	el-img-empty-alt-aria-label-empty
+Pass	el-img-empty-alt-aria-label-whitespace
+Pass	el-img-empty-alt-title
+Pass	el-img-empty-alt-title-empty
+Pass	el-section-no-name
+Pass	el-section-aria-label-empty
+Pass	el-section-aria-label-whitespace
+Pass	el-section-aria-labelledby-non-existing
+Pass	el-section-title-empty

@@ -1,0 +1,85 @@
+$aea521ec super-optional-call-this.js:1:1
+  Registers: 8
+  Blocks:    1
+  Constants:
+    [0] = String("method")
+    [1] = Undefined
+
+block0:
+  [   0] GetLexicalEnvironment dst:reg4
+  [   8] CreateLexicalEnvironment dst:reg5, parent:reg4, capacity:0
+  [  18] CreateVariable `Base`, is_immutable:true, is_global:false, is_strict:false
+  [  28] SetLexicalEnvironment environment:reg4
+  [  30] NewClass dst:reg6, class_environment:reg5, class_blueprint_index:0, element_keys:[element_keys:String("method")]
+  [  58] InitializeLexicalBinding `Base`, src:reg6
+  [  70] CreateLexicalEnvironment dst:reg5, parent:reg4, capacity:0
+  [  80] CreateVariable `Foo`, is_immutable:true, is_global:false, is_strict:false
+  [  90] GetGlobal dst:reg6, `Base`
+  [  a8] SetLexicalEnvironment environment:reg4
+  [  b0] NewClass dst:reg7, super_class:reg6, class_environment:reg5, class_blueprint_index:1, element_keys:[element_keys:String("method")]
+  [  d8] InitializeLexicalBinding `Foo`, src:reg7
+  [  f0] GetGlobal dst:reg7, `Foo`
+  [ 108] CallConstruct dst:reg6, callee:reg7, Foo
+  [ 120] GetById dst:reg7, base:reg6, `method`
+  [ 140] Call dst:reg5, callee:reg7, this_value:reg6, <object>.method
+  [ 160] End value:reg5
+
+
+Foo$4b66ae80 super-optional-call-this.js:4:1
+  Registers: 7
+  Blocks:    1
+
+block0:
+  [   0] CreateVariable `args`, is_immutable:false, is_global:false, is_strict:false
+  [  10] CreateRestParams dst:arg0, rest_index:0
+  [  20] InitializeLexicalBinding `args`, src:arg0
+  [  38] GetBinding dst:reg5, `args`
+  [  50] SuperCallWithArgumentArray dst:reg6, arguments:reg5, is_synthetic:true
+  [  60] Return value:reg6
+
+
+Base$811c9dc5
+  Registers: 5
+  Blocks:    1
+  Constants:
+    [0] = Undefined
+
+block0:
+  [   0] End value:Undefined
+
+
+method$e17748b6 super-optional-call-this.js:6:9
+  Registers: 9
+  Blocks:    4
+  Constants:
+    [0] = Undefined
+
+block0:
+  [   0] Mov dst:reg5, src:Undefined
+  [  10] ResolveThisBinding
+  [  18] ResolveSuperBase dst:reg7
+  [  20] GetByIdWithThis dst:reg8, base:reg7, `method`, this_value:this
+  [  40] Mov2 dst1:reg5, src1:this, dst2:reg6, src2:reg8
+  [  58] JumpNullish condition:reg6, true_target:block1, false_target:block3
+
+block1:
+  [  68] Mov dst:reg6, src:Undefined
+
+block2:
+  [  78] Return value:reg6
+
+block3:
+  [  80] NewArray dst:reg7
+  [  90] CallWithArgumentArray dst:reg6, callee:reg6, this_value:reg5, arguments:reg7
+  [  a8] Mov dst:reg5, src:Undefined
+  [  b8] Return value:reg6
+
+
+method$811c9dc5
+  Registers: 5
+  Blocks:    1
+  Constants:
+    [0] = Undefined
+
+block0:
+  [   0] End value:Undefined

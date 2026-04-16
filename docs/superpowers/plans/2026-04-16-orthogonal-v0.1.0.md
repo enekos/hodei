@@ -1,0 +1,3388 @@
+# Orthogonal v0.1.0 Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Build a keyboard-driven tiling browser on Servo with vim-style modal navigation, BSP tiling, hint mode, and session persistence.
+
+**Architecture:** Compositor-centric — Winit owns the event loop, Servo tiles render to offscreen FBOs, Slint HUD renders to a CPU buffer, a GL compositor blits tiles then alpha-blends the overlay. Three crates: `orthogonal-core` (pure logic, fully testable), `orthogonal-servo` (Servo facade), `orthogonal-app` (binary entrypoint).
+
+**Tech Stack:** Rust, Servo (libservo via submodule), Slint (software renderer), Winit 0.30, glow (GL), rusqlite (SQLite), serde/serde_json.
+
+**Design spec:** `docs/superpowers/specs/2026-04-16-orthogonal-browser-design.md`
+
+---
+
+## File Map
+
+All paths relative to project root (`orthogonal/`).
+
+**Scaffolding (pre-created, modify in place):**
+```
+Cargo.toml                                  # workspace root
+crates/orthogonal-core/Cargo.toml
+crates/orthogonal-core/build.rs
+crates/orthogonal-core/src/lib.rs
+crates/orthogonal-core/src/types.rs         # ViewId, Rect, Direction, enums
+crates/orthogonal-core/src/view.rs          # ViewManager
+crates/orthogonal-core/src/layout.rs        # BSP layout engine
+crates/orthogonal-core/src/input.rs         # Modal input state machine
+crates/orthogonal-core/src/hint.rs          # Hint label generation + parsing
+crates/orthogonal-core/src/session.rs       # SQLite session manager
+crates/orthogonal-core/src/hud.rs           # Slint HUD bridge
+crates/orthogonal-core/src/compositor.rs    # GL compositor
+crates/orthogonal-app/Cargo.toml
+crates/orthogonal-app/src/main.rs
+crates/orthogonal-app/src/app.rs            # Winit ApplicationHandler
+ui/hud.slint                                # Slint UI definition (complete)
+migrations/001_init.sql                     # SQLite schema (complete)
+```
+
+**Created during Servo integration (Tasks 9-10):**
+```
+servo/                                      # git submodule
+ladybird/                                   # git submodule (reference only)
+crates/orthogonal-servo/Cargo.toml
+crates/orthogonal-servo/src/lib.rs
+crates/orthogonal-servo/src/delegate.rs
+crates/orthogonal-servo/src/context.rs
+crates/orthogonal-servo/src/events.rs
+```
+
+---
+
+## Task 1: Workspace & Crate Scaffolding
+
+**Files:** All scaffolding files listed above.
+
+> The scaffolding files are pre-created with correct dependencies and empty module stubs. This task verifies everything compiles.
+
+- [ ] **Step 1: Verify the workspace compiles**
+
+Run: `cargo build --workspace`
+Expected: Compiles with warnings about unused code. Zero errors.
+
+- [ ] **Step 2: Verify tests run (no tests yet, but harness works)**
+
+Run: `cargo test --workspace`
+Expected: `0 tests passed` or similar. No errors.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add -A
+git commit -m "feat: scaffold workspace with orthogonal-core and orthogonal-app crates"
+```
+
+---
+
+## Task 2: Core Shared Types
+
+**Files:**
+- Modify: `crates/orthogonal-core/src/types.rs`
+- Modify: `crates/orthogonal-core/src/view.rs`
+- Test: inline `#[cfg(test)]` modules
+
+- [ ] **Step 1: Write types tests in `types.rs`**
+
+Add at the bottom of `crates/orthogonal-core/src/types.rs`:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn view_id_equality() {
+        assert_eq!(ViewId(1), ViewId(1));
+        assert_ne!(ViewId(1), ViewId(2));
+    }
+
+    #[test]
+    fn rect_contains_point() {
+        let r = Rect { x: 10.0, y: 20.0, width: 100.0, height: 50.0 };
+        assert!(r.contains(50.0, 40.0));
+        assert!(!r.contains(5.0, 40.0));
+        assert!(!r.contains(50.0, 80.0));
+    }
+
+    #[test]
+    fn rect_default_is_zero() {
+        let r = Rect::default();
+        assert_eq!(r.x, 0.0);
+        assert_eq!(r.width, 0.0);
+    }
+
+    #[test]
+    fn modifiers_default_is_none() {
+        let m = Modifiers::default();
+        assert!(!m.ctrl);
+        assert!(!m.shift);
+        assert!(!m.alt);
+        assert!(!m.meta);
+    }
+}
+```
+
+- [ ] **Step 2: Run tests — verify they fail**
+
+Run: `cargo test -p orthogonal-core -- types::tests --no-run 2>&1; cargo test -p orthogonal-core -- types::tests 2>&1`
+Expected: Compilation errors — `contains` method not found, types incomplete.
+
+- [ ] **Step 3: Implement types in `types.rs`**
+
+Replace the contents of `crates/orthogonal-core/src/types.rs` with:
+
+```rust
+use std::collections::HashMap;
+
+// === Identity ===
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ViewId(pub u64);
+
+// === Geometry ===
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl Rect {
+    pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self { x, y, width, height }
+    }
+
+    pub fn contains(&self, px: f32, py: f32) -> bool {
+        px >= self.x && px < self.x + self.width && py >= self.y && py < self.y + self.height
+    }
+}
+
+// === Directions ===
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SplitDirection {
+    Horizontal,
+    Vertical,
+}
+
+// === Input types (core-owned, no winit/servo dependency) ===
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoreKeyEvent {
+    pub key: CoreKey,
+    pub state: KeyState,
+    pub modifiers: Modifiers,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyState {
+    Pressed,
+    Released,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Modifiers {
+    pub ctrl: bool,
+    pub shift: bool,
+    pub alt: bool,
+    pub meta: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoreKey {
+    Char(char),
+    Escape,
+    Enter,
+    Backspace,
+    Tab,
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CoreMouseEvent {
+    Move { x: f32, y: f32 },
+    Down { x: f32, y: f32, button: MouseButton },
+    Up { x: f32, y: f32, button: MouseButton },
+    Scroll { x: f32, y: f32, delta_x: f32, delta_y: f32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CoreInputEvent {
+    Key(CoreKeyEvent),
+    Mouse(CoreMouseEvent),
+}
+
+// === Tile state (facade-compatible, no Servo types) ===
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TileLoadStatus {
+    Started,
+    HeadParsed,
+    Complete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TileCursor {
+    Default,
+    Pointer,
+    Text,
+}
+
+// === Hint types ===
+
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+pub struct HintElement {
+    pub tag: String,
+    pub href: String,
+    pub text: String,
+    pub x: f64,
+    pub y: f64,
+}
+
+// === Session types ===
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionInfo {
+    pub id: i64,
+    pub name: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub tile_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayoutNodeRow {
+    pub node_index: u32,
+    pub is_leaf: bool,
+    pub direction: Option<SplitDirection>,
+    pub ratio: Option<f32>,
+    pub view_id: Option<ViewId>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TileRow {
+    pub view_id: ViewId,
+    pub url: String,
+    pub title: String,
+    pub scroll_x: f64,
+    pub scroll_y: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn view_id_equality() {
+        assert_eq!(ViewId(1), ViewId(1));
+        assert_ne!(ViewId(1), ViewId(2));
+    }
+
+    #[test]
+    fn rect_contains_point() {
+        let r = Rect { x: 10.0, y: 20.0, width: 100.0, height: 50.0 };
+        assert!(r.contains(50.0, 40.0));
+        assert!(!r.contains(5.0, 40.0));
+        assert!(!r.contains(50.0, 80.0));
+    }
+
+    #[test]
+    fn rect_default_is_zero() {
+        let r = Rect::default();
+        assert_eq!(r.x, 0.0);
+        assert_eq!(r.width, 0.0);
+    }
+
+    #[test]
+    fn modifiers_default_is_none() {
+        let m = Modifiers::default();
+        assert!(!m.ctrl);
+        assert!(!m.shift);
+        assert!(!m.alt);
+        assert!(!m.meta);
+    }
+}
+```
+
+- [ ] **Step 4: Write ViewManager tests in `view.rs`**
+
+Replace the contents of `crates/orthogonal-core/src/view.rs` with:
+
+```rust
+use std::collections::HashMap;
+use crate::types::ViewId;
+
+pub struct View {
+    pub id: ViewId,
+    pub url: String,
+    pub title: String,
+    pub dirty: bool,
+}
+
+pub struct ViewManager {
+    views: HashMap<ViewId, View>,
+    next_id: u64,
+}
+
+impl ViewManager {
+    pub fn new() -> Self {
+        Self {
+            views: HashMap::new(),
+            next_id: 1,
+        }
+    }
+
+    pub fn create(&mut self, url: &str) -> ViewId {
+        let id = ViewId(self.next_id);
+        self.next_id += 1;
+        self.views.insert(id, View {
+            id,
+            url: url.to_string(),
+            title: String::new(),
+            dirty: true,
+        });
+        id
+    }
+
+    pub fn remove(&mut self, id: ViewId) -> Option<View> {
+        self.views.remove(&id)
+    }
+
+    pub fn get(&self, id: ViewId) -> Option<&View> {
+        self.views.get(&id)
+    }
+
+    pub fn get_mut(&mut self, id: ViewId) -> Option<&mut View> {
+        self.views.get_mut(&id)
+    }
+
+    pub fn mark_dirty(&mut self, id: ViewId) {
+        if let Some(v) = self.views.get_mut(&id) {
+            v.dirty = true;
+        }
+    }
+
+    pub fn clear_dirty(&mut self, id: ViewId) {
+        if let Some(v) = self.views.get_mut(&id) {
+            v.dirty = false;
+        }
+    }
+
+    pub fn dirty_views(&self) -> Vec<ViewId> {
+        self.views.values().filter(|v| v.dirty).map(|v| v.id).collect()
+    }
+
+    pub fn all_views(&self) -> Vec<ViewId> {
+        self.views.keys().copied().collect()
+    }
+
+    pub fn count(&self) -> usize {
+        self.views.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_returns_incrementing_ids() {
+        let mut vm = ViewManager::new();
+        let a = vm.create("https://a.com");
+        let b = vm.create("https://b.com");
+        assert_ne!(a, b);
+        assert_eq!(a, ViewId(1));
+        assert_eq!(b, ViewId(2));
+    }
+
+    #[test]
+    fn get_returns_created_view() {
+        let mut vm = ViewManager::new();
+        let id = vm.create("https://test.com");
+        let view = vm.get(id).unwrap();
+        assert_eq!(view.url, "https://test.com");
+        assert_eq!(view.title, "");
+    }
+
+    #[test]
+    fn remove_returns_view_and_removes_it() {
+        let mut vm = ViewManager::new();
+        let id = vm.create("https://test.com");
+        assert_eq!(vm.count(), 1);
+        let view = vm.remove(id).unwrap();
+        assert_eq!(view.url, "https://test.com");
+        assert_eq!(vm.count(), 0);
+        assert!(vm.get(id).is_none());
+    }
+
+    #[test]
+    fn dirty_tracking() {
+        let mut vm = ViewManager::new();
+        let id = vm.create("https://test.com");
+        assert!(vm.dirty_views().contains(&id)); // new views are dirty
+        vm.clear_dirty(id);
+        assert!(vm.dirty_views().is_empty());
+        vm.mark_dirty(id);
+        assert!(vm.dirty_views().contains(&id));
+    }
+}
+```
+
+- [ ] **Step 5: Run all tests — verify they pass**
+
+Run: `cargo test -p orthogonal-core`
+Expected: All tests pass.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/orthogonal-core/src/types.rs crates/orthogonal-core/src/view.rs
+git commit -m "feat: implement core shared types and ViewManager"
+```
+
+---
+
+## Task 3: BSP Layout Engine (TDD)
+
+**Files:**
+- Modify: `crates/orthogonal-core/src/layout.rs`
+- Test: inline `#[cfg(test)]` module
+
+This is the largest pure-logic module. Implement via TDD in sub-groups.
+
+### 3a: Basic structure + resolve
+
+- [ ] **Step 1: Write tests for empty layout and single view**
+
+Add to `crates/orthogonal-core/src/layout.rs`:
+
+```rust
+use crate::types::{ViewId, Rect, Direction, SplitDirection, LayoutNodeRow};
+
+pub enum Node {
+    Leaf { view_id: ViewId },
+    Branch {
+        direction: SplitDirection,
+        ratio: f32,
+        first: Box<Node>,
+        second: Box<Node>,
+    },
+}
+
+pub struct BspLayout {
+    root: Option<Node>,
+    viewport: Rect,
+    focused: Option<ViewId>,
+}
+
+impl BspLayout {
+    pub fn new(viewport: Rect) -> Self {
+        Self { root: None, viewport, focused: None }
+    }
+
+    pub fn add_first_view(&mut self, view_id: ViewId) {
+        assert!(self.root.is_none(), "add_first_view called on non-empty layout");
+        self.root = Some(Node::Leaf { view_id });
+        self.focused = Some(view_id);
+    }
+
+    pub fn resolve(&self) -> Vec<(ViewId, Rect)> {
+        let mut result = Vec::new();
+        if let Some(ref root) = self.root {
+            Self::resolve_node(root, self.viewport, &mut result);
+        }
+        result
+    }
+
+    fn resolve_node(node: &Node, rect: Rect, out: &mut Vec<(ViewId, Rect)>) {
+        match node {
+            Node::Leaf { view_id } => out.push((*view_id, rect)),
+            Node::Branch { direction, ratio, first, second } => {
+                let (r1, r2) = Self::split_rect(rect, *direction, *ratio);
+                Self::resolve_node(first, r1, out);
+                Self::resolve_node(second, r2, out);
+            }
+        }
+    }
+
+    fn split_rect(rect: Rect, dir: SplitDirection, ratio: f32) -> (Rect, Rect) {
+        match dir {
+            SplitDirection::Vertical => {
+                let w1 = rect.width * ratio;
+                (
+                    Rect::new(rect.x, rect.y, w1, rect.height),
+                    Rect::new(rect.x + w1, rect.y, rect.width - w1, rect.height),
+                )
+            }
+            SplitDirection::Horizontal => {
+                let h1 = rect.height * ratio;
+                (
+                    Rect::new(rect.x, rect.y, rect.width, h1),
+                    Rect::new(rect.x, rect.y + h1, rect.width, rect.height - h1),
+                )
+            }
+        }
+    }
+
+    pub fn focused(&self) -> Option<ViewId> {
+        self.focused
+    }
+
+    pub fn set_focused(&mut self, view_id: ViewId) {
+        self.focused = Some(view_id);
+    }
+
+    pub fn set_viewport(&mut self, viewport: Rect) {
+        self.viewport = viewport;
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.root.is_none()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vp() -> Rect {
+        Rect::new(0.0, 0.0, 800.0, 600.0)
+    }
+
+    #[test]
+    fn new_layout_is_empty() {
+        let layout = BspLayout::new(vp());
+        assert!(layout.is_empty());
+        assert!(layout.resolve().is_empty());
+        assert!(layout.focused().is_none());
+    }
+
+    #[test]
+    fn add_first_view_single_leaf() {
+        let mut layout = BspLayout::new(vp());
+        layout.add_first_view(ViewId(1));
+        let resolved = layout.resolve();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].0, ViewId(1));
+        assert_eq!(resolved[0].1, vp());
+        assert_eq!(layout.focused(), Some(ViewId(1)));
+    }
+}
+```
+
+- [ ] **Step 2: Run tests — verify they pass**
+
+Run: `cargo test -p orthogonal-core -- layout::tests`
+Expected: 2 tests pass.
+
+### 3b: Split
+
+- [ ] **Step 3: Write split tests**
+
+Add to the `tests` module in `layout.rs`:
+
+```rust
+    #[test]
+    fn split_vertical_creates_two_tiles() {
+        let mut layout = BspLayout::new(vp());
+        layout.add_first_view(ViewId(1));
+        let new_id = layout.split(ViewId(1), SplitDirection::Vertical);
+        let resolved = layout.resolve();
+        assert_eq!(resolved.len(), 2);
+        // First child: left half
+        assert_eq!(resolved[0].0, ViewId(1));
+        assert_eq!(resolved[0].1, Rect::new(0.0, 0.0, 400.0, 600.0));
+        // Second child: right half
+        assert_eq!(resolved[1].0, new_id);
+        assert_eq!(resolved[1].1, Rect::new(400.0, 0.0, 400.0, 600.0));
+    }
+
+    #[test]
+    fn split_horizontal_creates_top_bottom() {
+        let mut layout = BspLayout::new(vp());
+        layout.add_first_view(ViewId(1));
+        let new_id = layout.split(ViewId(1), SplitDirection::Horizontal);
+        let resolved = layout.resolve();
+        assert_eq!(resolved.len(), 2);
+        assert_eq!(resolved[0].1, Rect::new(0.0, 0.0, 800.0, 300.0));
+        assert_eq!(resolved[1].1, Rect::new(0.0, 300.0, 800.0, 300.0));
+    }
+
+    #[test]
+    fn nested_split() {
+        let mut layout = BspLayout::new(vp());
+        layout.add_first_view(ViewId(1));
+        let v2 = layout.split(ViewId(1), SplitDirection::Vertical);
+        let _v3 = layout.split(v2, SplitDirection::Horizontal);
+        let resolved = layout.resolve();
+        assert_eq!(resolved.len(), 3);
+        // Left half unchanged
+        assert_eq!(resolved[0].1, Rect::new(0.0, 0.0, 400.0, 600.0));
+        // Right-top
+        assert_eq!(resolved[1].1, Rect::new(400.0, 0.0, 400.0, 300.0));
+        // Right-bottom
+        assert_eq!(resolved[2].1, Rect::new(400.0, 300.0, 400.0, 300.0));
+    }
+```
+
+- [ ] **Step 4: Run tests — verify they fail**
+
+Run: `cargo test -p orthogonal-core -- layout::tests`
+Expected: Compile error — `split` method not found.
+
+- [ ] **Step 5: Implement `split`**
+
+Add to the `impl BspLayout` block in `layout.rs`:
+
+```rust
+    /// Counter for generating new ViewIds within the layout.
+    /// In production, ViewManager provides IDs; this is a fallback.
+    fn next_split_id(&self) -> ViewId {
+        // Walk the tree to find the max ViewId, then +1
+        fn max_id(node: &Node) -> u64 {
+            match node {
+                Node::Leaf { view_id } => view_id.0,
+                Node::Branch { first, second, .. } => max_id(first).max(max_id(second)),
+            }
+        }
+        let max = self.root.as_ref().map(|r| max_id(r)).unwrap_or(0);
+        ViewId(max + 1)
+    }
+
+    pub fn split(&mut self, target: ViewId, dir: SplitDirection) -> ViewId {
+        let new_id = self.next_split_id();
+        if let Some(ref mut root) = self.root {
+            Self::split_node(root, target, dir, new_id);
+        }
+        self.focused = Some(new_id);
+        new_id
+    }
+
+    fn split_node(node: &mut Node, target: ViewId, dir: SplitDirection, new_id: ViewId) -> bool {
+        match node {
+            Node::Leaf { view_id } if *view_id == target => {
+                let old_leaf = Node::Leaf { view_id: *view_id };
+                let new_leaf = Node::Leaf { view_id: new_id };
+                *node = Node::Branch {
+                    direction: dir,
+                    ratio: 0.5,
+                    first: Box::new(old_leaf),
+                    second: Box::new(new_leaf),
+                };
+                true
+            }
+            Node::Branch { first, second, .. } => {
+                Self::split_node(first, target, dir, new_id)
+                    || Self::split_node(second, target, dir, new_id)
+            }
+            _ => false,
+        }
+    }
+```
+
+- [ ] **Step 6: Run tests — verify they pass**
+
+Run: `cargo test -p orthogonal-core -- layout::tests`
+Expected: All 5 tests pass.
+
+### 3c: Close
+
+- [ ] **Step 7: Write close tests**
+
+Add to the `tests` module:
+
+```rust
+    #[test]
+    fn close_last_view_empties_layout() {
+        let mut layout = BspLayout::new(vp());
+        layout.add_first_view(ViewId(1));
+        layout.close(ViewId(1));
+        assert!(layout.is_empty());
+    }
+
+    #[test]
+    fn close_promotes_sibling() {
+        let mut layout = BspLayout::new(vp());
+        layout.add_first_view(ViewId(1));
+        let v2 = layout.split(ViewId(1), SplitDirection::Vertical);
+        layout.close(v2);
+        let resolved = layout.resolve();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].0, ViewId(1));
+        assert_eq!(resolved[0].1, vp()); // full viewport restored
+    }
+
+    #[test]
+    fn close_in_nested_tree() {
+        let mut layout = BspLayout::new(vp());
+        layout.add_first_view(ViewId(1));
+        let v2 = layout.split(ViewId(1), SplitDirection::Vertical);
+        let _v3 = layout.split(v2, SplitDirection::Horizontal);
+        // Close v2 (top-right) — its sibling v3 (bottom-right) takes the right half
+        layout.close(v2);
+        let resolved = layout.resolve();
+        assert_eq!(resolved.len(), 2);
+        assert_eq!(resolved[0].0, ViewId(1)); // left
+        // _v3 takes over the right half
+        assert_eq!(resolved[1].1, Rect::new(400.0, 0.0, 400.0, 600.0));
+    }
+```
+
+- [ ] **Step 8: Implement `close`**
+
+Add to the `impl BspLayout` block:
+
+```rust
+    pub fn close(&mut self, target: ViewId) {
+        if let Some(ref mut root) = self.root {
+            match root {
+                Node::Leaf { view_id } if *view_id == target => {
+                    self.root = None;
+                    self.focused = None;
+                    return;
+                }
+                _ => {}
+            }
+            if let Some(replacement) = Self::close_node(root, target) {
+                *root = replacement;
+            }
+        }
+        // Update focus if we closed the focused view
+        if self.focused == Some(target) {
+            self.focused = self.first_leaf();
+        }
+    }
+
+    /// Returns Some(sibling) if the target was found and removed at this level.
+    fn close_node(node: &mut Node, target: ViewId) -> Option<Node> {
+        match node {
+            Node::Branch { first, second, .. } => {
+                // Check if first child is the target leaf
+                if matches!(first.as_ref(), Node::Leaf { view_id } if *view_id == target) {
+                    return Some(*second.clone());
+                }
+                // Check if second child is the target leaf
+                if matches!(second.as_ref(), Node::Leaf { view_id } if *view_id == target) {
+                    return Some(*first.clone());
+                }
+                // Recurse into children
+                if let Some(replacement) = Self::close_node(first, target) {
+                    *first = Box::new(replacement);
+                } else if let Some(replacement) = Self::close_node(second, target) {
+                    *second = Box::new(replacement);
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn first_leaf(&self) -> Option<ViewId> {
+        fn walk(node: &Node) -> ViewId {
+            match node {
+                Node::Leaf { view_id } => *view_id,
+                Node::Branch { first, .. } => walk(first),
+            }
+        }
+        self.root.as_ref().map(walk)
+    }
+```
+
+Also add `Clone` derive to `Node`:
+
+```rust
+#[derive(Clone)]
+pub enum Node {
+    Leaf { view_id: ViewId },
+    Branch {
+        direction: SplitDirection,
+        ratio: f32,
+        first: Box<Node>,
+        second: Box<Node>,
+    },
+}
+```
+
+- [ ] **Step 9: Run tests — verify they pass**
+
+Run: `cargo test -p orthogonal-core -- layout::tests`
+Expected: All 8 tests pass.
+
+### 3d: Focus neighbor
+
+- [ ] **Step 10: Write focus_neighbor tests**
+
+Add to the `tests` module:
+
+```rust
+    #[test]
+    fn focus_neighbor_vertical_split() {
+        let mut layout = BspLayout::new(vp());
+        layout.add_first_view(ViewId(1));
+        let v2 = layout.split(ViewId(1), SplitDirection::Vertical);
+        // From left (v1), go right → v2
+        assert_eq!(layout.focus_neighbor(ViewId(1), Direction::Right), Some(v2));
+        // From right (v2), go left → v1
+        assert_eq!(layout.focus_neighbor(v2, Direction::Left), Some(ViewId(1)));
+        // From left (v1), go left → None (no neighbor)
+        assert_eq!(layout.focus_neighbor(ViewId(1), Direction::Left), None);
+    }
+
+    #[test]
+    fn focus_neighbor_horizontal_split() {
+        let mut layout = BspLayout::new(vp());
+        layout.add_first_view(ViewId(1));
+        let v2 = layout.split(ViewId(1), SplitDirection::Horizontal);
+        assert_eq!(layout.focus_neighbor(ViewId(1), Direction::Down), Some(v2));
+        assert_eq!(layout.focus_neighbor(v2, Direction::Up), Some(ViewId(1)));
+        assert_eq!(layout.focus_neighbor(ViewId(1), Direction::Up), None);
+    }
+```
+
+- [ ] **Step 11: Implement `focus_neighbor`**
+
+Add to the `impl BspLayout` block:
+
+```rust
+    pub fn focus_neighbor(&self, from: ViewId, dir: Direction) -> Option<ViewId> {
+        let resolved = self.resolve();
+        let current = resolved.iter().find(|(id, _)| *id == from)?;
+        let current_rect = current.1;
+
+        // Center point of current tile
+        let cx = current_rect.x + current_rect.width / 2.0;
+        let cy = current_rect.y + current_rect.height / 2.0;
+
+        // Find the closest tile in the given direction
+        let mut best: Option<(ViewId, f32)> = None;
+        for (id, rect) in &resolved {
+            if *id == from {
+                continue;
+            }
+            let nx = rect.x + rect.width / 2.0;
+            let ny = rect.y + rect.height / 2.0;
+            let is_in_direction = match dir {
+                Direction::Left => nx < cx,
+                Direction::Right => nx > cx,
+                Direction::Up => ny < cy,
+                Direction::Down => ny > cy,
+            };
+            if !is_in_direction {
+                continue;
+            }
+            let dist = (nx - cx).abs() + (ny - cy).abs();
+            if best.is_none() || dist < best.unwrap().1 {
+                best = Some((*id, dist));
+            }
+        }
+        best.map(|(id, _)| id)
+    }
+```
+
+- [ ] **Step 12: Run tests — verify they pass**
+
+Run: `cargo test -p orthogonal-core -- layout::tests`
+Expected: All 10 tests pass.
+
+### 3e: Resize split
+
+- [ ] **Step 13: Write resize_split tests**
+
+```rust
+    #[test]
+    fn resize_split_adjusts_ratio() {
+        let mut layout = BspLayout::new(vp());
+        layout.add_first_view(ViewId(1));
+        let v2 = layout.split(ViewId(1), SplitDirection::Vertical);
+        layout.resize_split(ViewId(1), 0.1); // increase left side
+        let resolved = layout.resolve();
+        // Left should be 60% (0.5 + 0.1)
+        let left_width = resolved[0].1.width;
+        assert!((left_width - 480.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn resize_split_clamps_ratio() {
+        let mut layout = BspLayout::new(vp());
+        layout.add_first_view(ViewId(1));
+        let _ = layout.split(ViewId(1), SplitDirection::Vertical);
+        layout.resize_split(ViewId(1), 1.0); // try to push way past limit
+        let resolved = layout.resolve();
+        let left_width = resolved[0].1.width;
+        // Should be clamped to 90% max
+        assert!((left_width - 720.0).abs() < 1.0);
+    }
+```
+
+- [ ] **Step 14: Implement `resize_split`**
+
+Add to `impl BspLayout`:
+
+```rust
+    pub fn resize_split(&mut self, target: ViewId, delta: f32) {
+        if let Some(ref mut root) = self.root {
+            Self::resize_node(root, target, delta);
+        }
+    }
+
+    fn resize_node(node: &mut Node, target: ViewId, delta: f32) -> bool {
+        match node {
+            Node::Branch { ratio, first, second, .. } => {
+                // Check if target is in first child
+                if Self::contains_view(first, target) {
+                    *ratio = (*ratio + delta).clamp(0.1, 0.9);
+                    return true;
+                }
+                // Check if target is in second child (resize opposite direction)
+                if Self::contains_view(second, target) {
+                    *ratio = (*ratio - delta).clamp(0.1, 0.9);
+                    return true;
+                }
+                // Recurse
+                Self::resize_node(first, target, delta) || Self::resize_node(second, target, delta)
+            }
+            _ => false,
+        }
+    }
+
+    fn contains_view(node: &Node, target: ViewId) -> bool {
+        match node {
+            Node::Leaf { view_id } => *view_id == target,
+            Node::Branch { first, second, .. } => {
+                Self::contains_view(first, target) || Self::contains_view(second, target)
+            }
+        }
+    }
+```
+
+- [ ] **Step 15: Run tests — verify they pass**
+
+Run: `cargo test -p orthogonal-core -- layout::tests`
+Expected: All 12 tests pass.
+
+### 3f: Serialize / Deserialize
+
+- [ ] **Step 16: Write serialize round-trip test**
+
+```rust
+    #[test]
+    fn serialize_deserialize_roundtrip() {
+        let mut layout = BspLayout::new(vp());
+        layout.add_first_view(ViewId(1));
+        let v2 = layout.split(ViewId(1), SplitDirection::Vertical);
+        let _v3 = layout.split(v2, SplitDirection::Horizontal);
+        layout.set_focused(ViewId(1));
+
+        let (nodes, focused) = layout.serialize();
+        let restored = BspLayout::deserialize(vp(), &nodes, focused);
+        assert_eq!(layout.resolve(), restored.resolve());
+        assert_eq!(restored.focused(), Some(ViewId(1)));
+    }
+```
+
+- [ ] **Step 17: Implement serialize/deserialize (BFS order)**
+
+Add to `impl BspLayout`:
+
+```rust
+    /// Serialize to BFS-order node rows for SQLite storage.
+    pub fn serialize(&self) -> (Vec<LayoutNodeRow>, Option<ViewId>) {
+        let mut rows = Vec::new();
+        if let Some(ref root) = self.root {
+            let mut queue = std::collections::VecDeque::new();
+            queue.push_back((root, 0u32));
+            while let Some((node, index)) = queue.pop_front() {
+                match node {
+                    Node::Leaf { view_id } => {
+                        rows.push(LayoutNodeRow {
+                            node_index: index,
+                            is_leaf: true,
+                            direction: None,
+                            ratio: None,
+                            view_id: Some(*view_id),
+                        });
+                    }
+                    Node::Branch { direction, ratio, first, second } => {
+                        rows.push(LayoutNodeRow {
+                            node_index: index,
+                            is_leaf: false,
+                            direction: Some(*direction),
+                            ratio: Some(*ratio),
+                            view_id: None,
+                        });
+                        queue.push_back((first, index * 2 + 1));
+                        queue.push_back((second, index * 2 + 2));
+                    }
+                }
+            }
+        }
+        (rows, self.focused)
+    }
+
+    /// Deserialize from BFS-order node rows.
+    pub fn deserialize(viewport: Rect, rows: &[LayoutNodeRow], focused: Option<ViewId>) -> Self {
+        if rows.is_empty() {
+            return Self { root: None, viewport, focused };
+        }
+        let map: std::collections::HashMap<u32, &LayoutNodeRow> =
+            rows.iter().map(|r| (r.node_index, r)).collect();
+
+        fn build(map: &std::collections::HashMap<u32, &LayoutNodeRow>, index: u32) -> Option<Node> {
+            let row = map.get(&index)?;
+            if row.is_leaf {
+                Some(Node::Leaf { view_id: row.view_id.unwrap() })
+            } else {
+                let first = build(map, index * 2 + 1)?;
+                let second = build(map, index * 2 + 2)?;
+                Some(Node::Branch {
+                    direction: row.direction.unwrap(),
+                    ratio: row.ratio.unwrap(),
+                    first: Box::new(first),
+                    second: Box::new(second),
+                })
+            }
+        }
+
+        let root = build(&map, 0);
+        Self { root, viewport, focused }
+    }
+```
+
+- [ ] **Step 18: Run tests — verify they pass**
+
+Run: `cargo test -p orthogonal-core -- layout::tests`
+Expected: All 13 tests pass.
+
+- [ ] **Step 19: Commit**
+
+```bash
+git add crates/orthogonal-core/src/layout.rs
+git commit -m "feat: implement BSP layout engine with split, close, focus, resize, serialize"
+```
+
+---
+
+## Task 4: Input State Machine (TDD)
+
+**Files:**
+- Modify: `crates/orthogonal-core/src/input.rs`
+- Test: inline `#[cfg(test)]` module
+
+- [ ] **Step 1: Write all input tests**
+
+Replace `crates/orthogonal-core/src/input.rs` with:
+
+```rust
+use crate::types::*;
+
+// === Modes ===
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Mode {
+    Normal,
+    Insert,
+    Command { buffer: String },
+    Hint { filter: String, labels: Vec<String> },
+}
+
+// === Actions ===
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Action {
+    FocusNeighbor(Direction),
+    SplitView(SplitDirection),
+    CloseView,
+    ResizeSplit(Direction, f32),
+    ForwardToServo(CoreKeyEvent),
+    Navigate(String),
+    Back,
+    Forward,
+    Reload,
+    EnterHintMode,
+    HintCharTyped(char),
+    ActivateHint(String),
+    EnterInsert,
+    EnterCommand,
+    ExitToNormal,
+    SaveSession,
+    RestoreSession,
+    Quit,
+}
+
+// === Router ===
+
+pub struct InputRouter {
+    mode: Mode,
+}
+
+impl InputRouter {
+    pub fn new() -> Self {
+        Self { mode: Mode::Normal }
+    }
+
+    pub fn mode(&self) -> &Mode {
+        &self.mode
+    }
+
+    pub fn handle(&mut self, event: &CoreKeyEvent) -> Vec<Action> {
+        if event.state != KeyState::Pressed {
+            return vec![];
+        }
+        match &self.mode {
+            Mode::Normal => self.handle_normal(event),
+            Mode::Insert => self.handle_insert(event),
+            Mode::Command { .. } => self.handle_command(event),
+            Mode::Hint { .. } => self.handle_hint(event),
+        }
+    }
+
+    /// Called by app after hint elements are fetched from Servo.
+    pub fn enter_hint_mode(&mut self, labels: Vec<String>) {
+        self.mode = Mode::Hint { filter: String::new(), labels };
+    }
+
+    fn handle_normal(&mut self, event: &CoreKeyEvent) -> Vec<Action> {
+        let m = &event.modifiers;
+        match event.key {
+            CoreKey::Char('i') if !m.ctrl => {
+                self.mode = Mode::Insert;
+                vec![Action::EnterInsert]
+            }
+            CoreKey::Char(':') if !m.ctrl => {
+                self.mode = Mode::Command { buffer: String::new() };
+                vec![Action::EnterCommand]
+            }
+            CoreKey::Char('f') if !m.ctrl => {
+                vec![Action::EnterHintMode]
+            }
+            CoreKey::Char('h') if !m.ctrl && !m.shift => vec![Action::FocusNeighbor(Direction::Left)],
+            CoreKey::Char('j') if !m.ctrl && !m.shift => vec![Action::FocusNeighbor(Direction::Down)],
+            CoreKey::Char('k') if !m.ctrl && !m.shift => vec![Action::FocusNeighbor(Direction::Up)],
+            CoreKey::Char('l') if !m.ctrl && !m.shift => vec![Action::FocusNeighbor(Direction::Right)],
+            CoreKey::Char('H') if !m.ctrl => vec![Action::ResizeSplit(Direction::Left, 0.05)],
+            CoreKey::Char('J') if !m.ctrl => vec![Action::ResizeSplit(Direction::Down, 0.05)],
+            CoreKey::Char('K') if !m.ctrl => vec![Action::ResizeSplit(Direction::Up, 0.05)],
+            CoreKey::Char('L') if !m.ctrl => vec![Action::ResizeSplit(Direction::Right, 0.05)],
+            CoreKey::Char('v') if m.ctrl => vec![Action::SplitView(SplitDirection::Vertical)],
+            CoreKey::Char('s') if m.ctrl => vec![Action::SplitView(SplitDirection::Horizontal)],
+            CoreKey::Char('q') if !m.ctrl => vec![Action::CloseView],
+            CoreKey::Char('r') if !m.ctrl => vec![Action::Reload],
+            CoreKey::Char('b') if m.ctrl => vec![Action::Back],
+            CoreKey::Char('f') if m.ctrl => vec![Action::Forward],
+            _ => vec![],
+        }
+    }
+
+    fn handle_insert(&mut self, event: &CoreKeyEvent) -> Vec<Action> {
+        if event.key == CoreKey::Escape {
+            self.mode = Mode::Normal;
+            return vec![Action::ExitToNormal];
+        }
+        vec![Action::ForwardToServo(event.clone())]
+    }
+
+    fn handle_command(&mut self, event: &CoreKeyEvent) -> Vec<Action> {
+        match event.key {
+            CoreKey::Escape => {
+                self.mode = Mode::Normal;
+                vec![Action::ExitToNormal]
+            }
+            CoreKey::Enter => {
+                let buffer = if let Mode::Command { buffer } = &self.mode {
+                    buffer.clone()
+                } else {
+                    unreachable!()
+                };
+                self.mode = Mode::Normal;
+                self.parse_command(&buffer)
+            }
+            CoreKey::Backspace => {
+                if let Mode::Command { buffer } = &mut self.mode {
+                    buffer.pop();
+                }
+                vec![]
+            }
+            CoreKey::Char(c) => {
+                if let Mode::Command { buffer } = &mut self.mode {
+                    buffer.push(c);
+                }
+                vec![]
+            }
+            _ => vec![],
+        }
+    }
+
+    fn handle_hint(&mut self, event: &CoreKeyEvent) -> Vec<Action> {
+        match event.key {
+            CoreKey::Escape => {
+                self.mode = Mode::Normal;
+                vec![Action::ExitToNormal]
+            }
+            CoreKey::Char(c) => {
+                let (new_filter, matching) = if let Mode::Hint { filter, labels } = &self.mode {
+                    let mut f = filter.clone();
+                    f.push(c);
+                    let matching: Vec<String> = labels
+                        .iter()
+                        .filter(|l| l.starts_with(&f))
+                        .cloned()
+                        .collect();
+                    (f, matching)
+                } else {
+                    unreachable!()
+                };
+
+                if matching.len() == 1 {
+                    let label = matching[0].clone();
+                    self.mode = Mode::Normal;
+                    vec![Action::ActivateHint(label)]
+                } else if matching.is_empty() {
+                    // No match — cancel hint mode
+                    self.mode = Mode::Normal;
+                    vec![Action::ExitToNormal]
+                } else {
+                    if let Mode::Hint { filter, .. } = &mut self.mode {
+                        *filter = new_filter;
+                    }
+                    vec![Action::HintCharTyped(c)]
+                }
+            }
+            _ => vec![],
+        }
+    }
+
+    fn parse_command(&self, cmd: &str) -> Vec<Action> {
+        let parts: Vec<&str> = cmd.trim().splitn(2, ' ').collect();
+        match parts.first().copied() {
+            Some("open" | "o") => {
+                if let Some(url) = parts.get(1) {
+                    vec![Action::Navigate(url.to_string())]
+                } else {
+                    vec![]
+                }
+            }
+            Some("quit" | "q") => vec![Action::Quit],
+            Some("save") => vec![Action::SaveSession],
+            Some("restore") => vec![Action::RestoreSession],
+            _ => vec![],
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(c: char) -> CoreKeyEvent {
+        CoreKeyEvent {
+            key: CoreKey::Char(c),
+            state: KeyState::Pressed,
+            modifiers: Modifiers::default(),
+        }
+    }
+
+    fn ctrl_key(c: char) -> CoreKeyEvent {
+        CoreKeyEvent {
+            key: CoreKey::Char(c),
+            state: KeyState::Pressed,
+            modifiers: Modifiers { ctrl: true, ..Default::default() },
+        }
+    }
+
+    fn special(k: CoreKey) -> CoreKeyEvent {
+        CoreKeyEvent {
+            key: k,
+            state: KeyState::Pressed,
+            modifiers: Modifiers::default(),
+        }
+    }
+
+    #[test]
+    fn starts_in_normal_mode() {
+        let router = InputRouter::new();
+        assert_eq!(*router.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn i_enters_insert_mode() {
+        let mut router = InputRouter::new();
+        let actions = router.handle(&key('i'));
+        assert_eq!(actions, vec![Action::EnterInsert]);
+        assert!(matches!(router.mode(), Mode::Insert));
+    }
+
+    #[test]
+    fn esc_returns_to_normal_from_insert() {
+        let mut router = InputRouter::new();
+        router.handle(&key('i'));
+        let actions = router.handle(&special(CoreKey::Escape));
+        assert_eq!(actions, vec![Action::ExitToNormal]);
+        assert_eq!(*router.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn insert_forwards_keys_to_servo() {
+        let mut router = InputRouter::new();
+        router.handle(&key('i'));
+        let actions = router.handle(&key('a'));
+        assert_eq!(actions, vec![Action::ForwardToServo(key('a'))]);
+    }
+
+    #[test]
+    fn colon_enters_command_mode() {
+        let mut router = InputRouter::new();
+        let actions = router.handle(&key(':'));
+        assert_eq!(actions, vec![Action::EnterCommand]);
+        assert!(matches!(router.mode(), Mode::Command { .. }));
+    }
+
+    #[test]
+    fn command_mode_builds_buffer() {
+        let mut router = InputRouter::new();
+        router.handle(&key(':'));
+        router.handle(&key('o'));
+        router.handle(&key('p'));
+        if let Mode::Command { buffer } = router.mode() {
+            assert_eq!(buffer, "op");
+        } else {
+            panic!("not in command mode");
+        }
+    }
+
+    #[test]
+    fn command_enter_executes_open() {
+        let mut router = InputRouter::new();
+        router.handle(&key(':'));
+        for c in "open https://example.com".chars() {
+            router.handle(&key(c));
+        }
+        let actions = router.handle(&special(CoreKey::Enter));
+        assert_eq!(actions, vec![Action::Navigate("https://example.com".into())]);
+        assert_eq!(*router.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn command_esc_cancels() {
+        let mut router = InputRouter::new();
+        router.handle(&key(':'));
+        router.handle(&key('x'));
+        let actions = router.handle(&special(CoreKey::Escape));
+        assert_eq!(actions, vec![Action::ExitToNormal]);
+        assert_eq!(*router.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn f_triggers_hint_mode_request() {
+        let mut router = InputRouter::new();
+        let actions = router.handle(&key('f'));
+        assert_eq!(actions, vec![Action::EnterHintMode]);
+        // Still in Normal — app will call enter_hint_mode after fetching labels
+        assert_eq!(*router.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn hint_mode_filters_and_activates() {
+        let mut router = InputRouter::new();
+        router.enter_hint_mode(vec!["as".into(), "ad".into(), "af".into()]);
+        let actions = router.handle(&key('a'));
+        assert_eq!(actions, vec![Action::HintCharTyped('a')]);
+        // Second char narrows to one
+        let actions = router.handle(&key('s'));
+        assert_eq!(actions, vec![Action::ActivateHint("as".into())]);
+        assert_eq!(*router.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn hint_mode_esc_cancels() {
+        let mut router = InputRouter::new();
+        router.enter_hint_mode(vec!["as".into()]);
+        let actions = router.handle(&special(CoreKey::Escape));
+        assert_eq!(actions, vec![Action::ExitToNormal]);
+        assert_eq!(*router.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn normal_hjkl_focus_neighbors() {
+        let mut router = InputRouter::new();
+        assert_eq!(router.handle(&key('h')), vec![Action::FocusNeighbor(Direction::Left)]);
+        assert_eq!(router.handle(&key('j')), vec![Action::FocusNeighbor(Direction::Down)]);
+        assert_eq!(router.handle(&key('k')), vec![Action::FocusNeighbor(Direction::Up)]);
+        assert_eq!(router.handle(&key('l')), vec![Action::FocusNeighbor(Direction::Right)]);
+    }
+
+    #[test]
+    fn ctrl_v_splits_vertical() {
+        let mut router = InputRouter::new();
+        assert_eq!(router.handle(&ctrl_key('v')), vec![Action::SplitView(SplitDirection::Vertical)]);
+    }
+
+    #[test]
+    fn ctrl_s_splits_horizontal() {
+        let mut router = InputRouter::new();
+        assert_eq!(router.handle(&ctrl_key('s')), vec![Action::SplitView(SplitDirection::Horizontal)]);
+    }
+
+    #[test]
+    fn q_closes_view() {
+        let mut router = InputRouter::new();
+        assert_eq!(router.handle(&key('q')), vec![Action::CloseView]);
+    }
+
+    #[test]
+    fn released_keys_are_ignored() {
+        let mut router = InputRouter::new();
+        let event = CoreKeyEvent {
+            key: CoreKey::Char('i'),
+            state: KeyState::Released,
+            modifiers: Modifiers::default(),
+        };
+        assert!(router.handle(&event).is_empty());
+        assert_eq!(*router.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn command_backspace_removes_char() {
+        let mut router = InputRouter::new();
+        router.handle(&key(':'));
+        router.handle(&key('a'));
+        router.handle(&key('b'));
+        router.handle(&special(CoreKey::Backspace));
+        if let Mode::Command { buffer } = router.mode() {
+            assert_eq!(buffer, "a");
+        } else {
+            panic!("not in command mode");
+        }
+    }
+}
+```
+
+- [ ] **Step 2: Run tests — verify they pass**
+
+Run: `cargo test -p orthogonal-core -- input::tests`
+Expected: All 17 tests pass (the implementation is included above).
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add crates/orthogonal-core/src/input.rs
+git commit -m "feat: implement modal input state machine with Normal/Insert/Command/Hint modes"
+```
+
+---
+
+## Task 5: Hint Label Generation (TDD)
+
+**Files:**
+- Modify: `crates/orthogonal-core/src/hint.rs`
+- Test: inline `#[cfg(test)]` module
+
+- [ ] **Step 1: Write hint tests and implementation**
+
+Replace `crates/orthogonal-core/src/hint.rs` with:
+
+```rust
+use crate::types::HintElement;
+
+const HINT_CHARS: &[u8] = b"asdfghjkl";
+
+/// Generate N labels of uniform length from home-row characters.
+/// 1-9 elements: 1 char. 10-81: 2 chars. 82-729: 3 chars.
+pub fn generate_labels(count: usize) -> Vec<String> {
+    if count == 0 {
+        return vec![];
+    }
+    let base = HINT_CHARS.len();
+
+    let mut length = 1usize;
+    while base.pow(length as u32) < count {
+        length += 1;
+    }
+
+    let mut labels = Vec::with_capacity(count);
+    for i in 0..count {
+        let mut label = Vec::with_capacity(length);
+        let mut n = i;
+        for _ in 0..length {
+            label.push(HINT_CHARS[n % base] as char);
+            n /= base;
+        }
+        label.reverse();
+        labels.push(label.into_iter().collect());
+    }
+    labels
+}
+
+/// Filter labels to those matching the typed prefix.
+pub fn filter_labels<'a>(prefix: &str, labels: &'a [String]) -> Vec<&'a String> {
+    labels.iter().filter(|l| l.starts_with(prefix)).collect()
+}
+
+/// Parse the JSON result from the DOM query script into HintElements.
+pub fn parse_hint_elements(json: &str) -> Result<Vec<HintElement>, serde_json::Error> {
+    serde_json::from_str(json)
+}
+
+/// The JavaScript snippet injected into Servo to find clickable elements.
+pub const HINT_QUERY_SCRIPT: &str = r#"(function() {
+    const selectors = 'a[href], button, input, select, textarea, [onclick], [role="button"], [role="link"], [tabindex]';
+    const elements = document.querySelectorAll(selectors);
+    const results = [];
+    for (const el of elements) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) continue;
+        if (rect.bottom < 0 || rect.top > window.innerHeight) continue;
+        results.push({
+            tag: el.tagName,
+            href: el.href || '',
+            text: (el.textContent || '').slice(0, 50),
+            x: rect.x + rect.width / 2,
+            y: rect.y + rect.height / 2
+        });
+    }
+    return JSON.stringify(results);
+})()"#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_labels() {
+        assert!(generate_labels(0).is_empty());
+    }
+
+    #[test]
+    fn single_label() {
+        let labels = generate_labels(1);
+        assert_eq!(labels, vec!["a"]);
+    }
+
+    #[test]
+    fn nine_labels_are_single_char() {
+        let labels = generate_labels(9);
+        assert_eq!(labels.len(), 9);
+        assert_eq!(labels[0], "a");
+        assert_eq!(labels[8], "l");
+        assert!(labels.iter().all(|l| l.len() == 1));
+    }
+
+    #[test]
+    fn ten_labels_are_two_chars() {
+        let labels = generate_labels(10);
+        assert_eq!(labels.len(), 10);
+        assert!(labels.iter().all(|l| l.len() == 2));
+        assert_eq!(labels[0], "aa");
+        assert_eq!(labels[1], "as");
+    }
+
+    #[test]
+    fn eighty_one_labels_fills_two_chars() {
+        let labels = generate_labels(81);
+        assert_eq!(labels.len(), 81);
+        assert!(labels.iter().all(|l| l.len() == 2));
+        assert_eq!(labels[80], "ll");
+    }
+
+    #[test]
+    fn eighty_two_labels_are_three_chars() {
+        let labels = generate_labels(82);
+        assert!(labels.iter().all(|l| l.len() == 3));
+    }
+
+    #[test]
+    fn labels_are_unique() {
+        let labels = generate_labels(81);
+        let set: std::collections::HashSet<_> = labels.iter().collect();
+        assert_eq!(set.len(), 81);
+    }
+
+    #[test]
+    fn filter_labels_by_prefix() {
+        let labels = generate_labels(20);
+        let filtered = filter_labels("a", &labels);
+        assert!(filtered.iter().all(|l| l.starts_with('a')));
+        assert!(!filtered.is_empty());
+    }
+
+    #[test]
+    fn filter_labels_no_match() {
+        let labels = generate_labels(5); // single-char: a, s, d, f, g
+        let filtered = filter_labels("z", &labels);
+        assert!(filtered.is_empty());
+    }
+
+    #[test]
+    fn parse_hint_elements_from_json() {
+        let json = r#"[{"tag":"A","href":"https://example.com","text":"Click me","x":100.5,"y":200.0}]"#;
+        let elements = parse_hint_elements(json).unwrap();
+        assert_eq!(elements.len(), 1);
+        assert_eq!(elements[0].tag, "A");
+        assert_eq!(elements[0].href, "https://example.com");
+        assert!((elements[0].x - 100.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_hint_elements_empty() {
+        let elements = parse_hint_elements("[]").unwrap();
+        assert!(elements.is_empty());
+    }
+}
+```
+
+- [ ] **Step 2: Run tests**
+
+Run: `cargo test -p orthogonal-core -- hint::tests`
+Expected: All 11 tests pass.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add crates/orthogonal-core/src/hint.rs
+git commit -m "feat: implement hint label generation and DOM element parsing"
+```
+
+---
+
+## Task 6: Session Persistence (TDD)
+
+**Files:**
+- Modify: `crates/orthogonal-core/src/session.rs`
+- Reference: `migrations/001_init.sql` (pre-created)
+- Test: inline `#[cfg(test)]` module
+
+- [ ] **Step 1: Write session tests and implementation**
+
+Replace `crates/orthogonal-core/src/session.rs` with:
+
+```rust
+use std::path::Path;
+use rusqlite::{params, Connection};
+use crate::types::*;
+
+const SCHEMA: &str = include_str!("../../../migrations/001_init.sql");
+
+pub struct SessionManager {
+    db: Connection,
+}
+
+impl SessionManager {
+    pub fn open(path: &Path) -> Result<Self, rusqlite::Error> {
+        let db = Connection::open(path)?;
+        db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+        db.execute_batch(SCHEMA)?;
+        Ok(Self { db })
+    }
+
+    pub fn open_in_memory() -> Result<Self, rusqlite::Error> {
+        let db = Connection::open_in_memory()?;
+        db.execute_batch("PRAGMA foreign_keys=ON;")?;
+        db.execute_batch(SCHEMA)?;
+        Ok(Self { db })
+    }
+
+    pub fn save(
+        &self,
+        name: &str,
+        nodes: &[LayoutNodeRow],
+        tiles: &[TileRow],
+        focused: Option<ViewId>,
+    ) -> Result<(), rusqlite::Error> {
+        let tx = self.db.unchecked_transaction()?;
+
+        // Delete existing session with this name
+        tx.execute("DELETE FROM sessions WHERE name = ?1", params![name])?;
+
+        // Create new session
+        tx.execute(
+            "INSERT INTO sessions (name) VALUES (?1)",
+            params![name],
+        )?;
+        let session_id = tx.last_insert_rowid();
+
+        // Insert tiles
+        for tile in tiles {
+            tx.execute(
+                "INSERT INTO tiles (session_id, view_id, url, title, scroll_x, scroll_y) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![session_id, tile.view_id.0 as i64, tile.url, tile.title, tile.scroll_x, tile.scroll_y],
+            )?;
+        }
+
+        // Insert layout nodes
+        for node in nodes {
+            let dir_str = node.direction.map(|d| match d {
+                SplitDirection::Horizontal => "h",
+                SplitDirection::Vertical => "v",
+            });
+            tx.execute(
+                "INSERT INTO layout_tree (session_id, node_index, is_leaf, direction, ratio, view_id, focused_view_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    session_id,
+                    node.node_index as i64,
+                    node.is_leaf as i32,
+                    dir_str,
+                    node.ratio,
+                    node.view_id.map(|v| v.0 as i64),
+                    focused.map(|v| v.0 as i64),
+                ],
+            )?;
+        }
+
+        tx.commit()
+    }
+
+    pub fn restore(&self, name: &str) -> Result<Option<(Vec<LayoutNodeRow>, Vec<TileRow>, Option<ViewId>)>, rusqlite::Error> {
+        let session_id: Option<i64> = self.db
+            .query_row(
+                "SELECT id FROM sessions WHERE name = ?1",
+                params![name],
+                |row| row.get(0),
+            )
+            .ok();
+
+        let session_id = match session_id {
+            Some(id) => id,
+            None => return Ok(None),
+        };
+
+        // Read tiles
+        let mut stmt = self.db.prepare(
+            "SELECT view_id, url, title, scroll_x, scroll_y FROM tiles WHERE session_id = ?1"
+        )?;
+        let tiles: Vec<TileRow> = stmt.query_map(params![session_id], |row| {
+            Ok(TileRow {
+                view_id: ViewId(row.get::<_, i64>(0)? as u64),
+                url: row.get(1)?,
+                title: row.get(2)?,
+                scroll_x: row.get(3)?,
+                scroll_y: row.get(4)?,
+            })
+        })?.collect::<Result<Vec<_>, _>>()?;
+
+        // Read layout nodes
+        let mut stmt = self.db.prepare(
+            "SELECT node_index, is_leaf, direction, ratio, view_id, focused_view_id FROM layout_tree WHERE session_id = ?1 ORDER BY node_index"
+        )?;
+        let mut focused: Option<ViewId> = None;
+        let nodes: Vec<LayoutNodeRow> = stmt.query_map(params![session_id], |row| {
+            let fv: Option<i64> = row.get(5)?;
+            if let Some(fv) = fv {
+                focused = Some(ViewId(fv as u64));
+            }
+            let dir_str: Option<String> = row.get(2)?;
+            Ok(LayoutNodeRow {
+                node_index: row.get::<_, i64>(0)? as u32,
+                is_leaf: row.get::<_, i32>(1)? != 0,
+                direction: dir_str.map(|s| match s.as_str() {
+                    "h" => SplitDirection::Horizontal,
+                    "v" => SplitDirection::Vertical,
+                    _ => SplitDirection::Vertical,
+                }),
+                ratio: row.get(3)?,
+                view_id: row.get::<_, Option<i64>>(4)?.map(|v| ViewId(v as u64)),
+            })
+        })?.collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Some((nodes, tiles, focused)))
+    }
+
+    pub fn autosave(
+        &self,
+        nodes: &[LayoutNodeRow],
+        tiles: &[TileRow],
+        focused: Option<ViewId>,
+    ) -> Result<(), rusqlite::Error> {
+        self.save("default", nodes, tiles, focused)
+    }
+
+    pub fn list(&self) -> Result<Vec<SessionInfo>, rusqlite::Error> {
+        let mut stmt = self.db.prepare(
+            "SELECT s.id, s.name, s.created_at, s.updated_at, COUNT(t.id) \
+             FROM sessions s LEFT JOIN tiles t ON t.session_id = s.id \
+             GROUP BY s.id ORDER BY s.updated_at DESC"
+        )?;
+        let sessions = stmt.query_map([], |row| {
+            Ok(SessionInfo {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                created_at: row.get(2)?,
+                updated_at: row.get(3)?,
+                tile_count: row.get::<_, i64>(4)? as usize,
+            })
+        })?.collect::<Result<Vec<_>, _>>()?;
+        Ok(sessions)
+    }
+
+    pub fn delete(&self, name: &str) -> Result<(), rusqlite::Error> {
+        self.db.execute("DELETE FROM sessions WHERE name = ?1", params![name])?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_tiles() -> Vec<TileRow> {
+        vec![
+            TileRow {
+                view_id: ViewId(1),
+                url: "https://example.com".into(),
+                title: "Example".into(),
+                scroll_x: 0.0,
+                scroll_y: 100.0,
+            },
+            TileRow {
+                view_id: ViewId(2),
+                url: "https://rust-lang.org".into(),
+                title: "Rust".into(),
+                scroll_x: 0.0,
+                scroll_y: 0.0,
+            },
+        ]
+    }
+
+    fn sample_nodes() -> Vec<LayoutNodeRow> {
+        vec![
+            LayoutNodeRow {
+                node_index: 0,
+                is_leaf: false,
+                direction: Some(SplitDirection::Vertical),
+                ratio: Some(0.5),
+                view_id: None,
+            },
+            LayoutNodeRow {
+                node_index: 1,
+                is_leaf: true,
+                direction: None,
+                ratio: None,
+                view_id: Some(ViewId(1)),
+            },
+            LayoutNodeRow {
+                node_index: 2,
+                is_leaf: true,
+                direction: None,
+                ratio: None,
+                view_id: Some(ViewId(2)),
+            },
+        ]
+    }
+
+    #[test]
+    fn open_creates_tables() {
+        let sm = SessionManager::open_in_memory().unwrap();
+        // Should not panic — tables exist
+        let count: i64 = sm.db
+            .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn save_and_restore_roundtrip() {
+        let sm = SessionManager::open_in_memory().unwrap();
+        let tiles = sample_tiles();
+        let nodes = sample_nodes();
+        sm.save("test", &nodes, &tiles, Some(ViewId(1))).unwrap();
+
+        let (restored_nodes, restored_tiles, focused) = sm.restore("test").unwrap().unwrap();
+        assert_eq!(restored_nodes.len(), 3);
+        assert_eq!(restored_tiles.len(), 2);
+        assert_eq!(focused, Some(ViewId(1)));
+        assert_eq!(restored_tiles[0].url, "https://example.com");
+        assert_eq!(restored_nodes[0].direction, Some(SplitDirection::Vertical));
+    }
+
+    #[test]
+    fn restore_nonexistent_returns_none() {
+        let sm = SessionManager::open_in_memory().unwrap();
+        assert!(sm.restore("nope").unwrap().is_none());
+    }
+
+    #[test]
+    fn autosave_overwrites_default() {
+        let sm = SessionManager::open_in_memory().unwrap();
+        let tiles1 = vec![TileRow {
+            view_id: ViewId(1),
+            url: "https://a.com".into(),
+            title: "A".into(),
+            scroll_x: 0.0,
+            scroll_y: 0.0,
+        }];
+        let nodes1 = vec![LayoutNodeRow {
+            node_index: 0,
+            is_leaf: true,
+            direction: None,
+            ratio: None,
+            view_id: Some(ViewId(1)),
+        }];
+        sm.autosave(&nodes1, &tiles1, Some(ViewId(1))).unwrap();
+
+        // Autosave again with different data
+        let tiles2 = vec![TileRow {
+            view_id: ViewId(5),
+            url: "https://b.com".into(),
+            title: "B".into(),
+            scroll_x: 0.0,
+            scroll_y: 0.0,
+        }];
+        sm.autosave(&nodes1, &tiles2, Some(ViewId(5))).unwrap();
+
+        let (_, restored_tiles, focused) = sm.restore("default").unwrap().unwrap();
+        assert_eq!(restored_tiles.len(), 1);
+        assert_eq!(restored_tiles[0].url, "https://b.com");
+        assert_eq!(focused, Some(ViewId(5)));
+    }
+
+    #[test]
+    fn list_sessions() {
+        let sm = SessionManager::open_in_memory().unwrap();
+        sm.save("alpha", &sample_nodes(), &sample_tiles(), None).unwrap();
+        sm.save("beta", &[], &[], None).unwrap();
+        let list = sm.list().unwrap();
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn delete_session() {
+        let sm = SessionManager::open_in_memory().unwrap();
+        sm.save("doomed", &sample_nodes(), &sample_tiles(), None).unwrap();
+        sm.delete("doomed").unwrap();
+        assert!(sm.restore("doomed").unwrap().is_none());
+    }
+}
+```
+
+- [ ] **Step 2: Run tests**
+
+Run: `cargo test -p orthogonal-core -- session::tests`
+Expected: All 6 tests pass.
+
+Note: The `include_str!` path `../../../migrations/001_init.sql` is relative to the source file (`crates/orthogonal-core/src/session.rs` → up 3 levels to workspace root → `migrations/`).
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add crates/orthogonal-core/src/session.rs
+git commit -m "feat: implement SQLite session manager with save, restore, autosave"
+```
+
+---
+
+## Task 7: Slint HUD Definition & Bridge
+
+**Files:**
+- Already created: `ui/hud.slint` (pre-created, complete)
+- Modify: `crates/orthogonal-core/src/hud.rs`
+- Reference: `crates/orthogonal-core/build.rs` (pre-created)
+
+> The `.slint` file and `build.rs` are pre-created. This task implements the Rust bridge that drives the Slint overlay.
+
+- [ ] **Step 1: Implement the HUD bridge in `hud.rs`**
+
+Replace `crates/orthogonal-core/src/hud.rs` with:
+
+```rust
+use slint::platform::software_renderer::{
+    MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType, TargetPixel,
+};
+use slint::platform::{Platform, WindowAdapter};
+use slint::{ModelRc, SharedString, VecModel};
+use std::rc::Rc;
+
+slint::include_modules!();
+
+// === RGBA pixel type for GL upload ===
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct Rgba8Pixel {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
+
+impl TargetPixel for Rgba8Pixel {
+    fn blend(&mut self, color: PremultipliedRgbaColor) {
+        let inv_sa = 255u16 - color.alpha as u16;
+        self.r = (color.red as u16 + self.r as u16 * inv_sa / 255) as u8;
+        self.g = (color.green as u16 + self.g as u16 * inv_sa / 255) as u8;
+        self.b = (color.blue as u16 + self.b as u16 * inv_sa / 255) as u8;
+        self.a = (color.alpha as u16 + self.a as u16 * inv_sa / 255) as u8;
+    }
+
+    fn from_rgb(r: u8, g: u8, b: u8) -> Self {
+        Self { r, g, b, a: 255 }
+    }
+}
+
+// === Slint Platform ===
+
+struct SlintPlatform {
+    window: Rc<MinimalSoftwareWindow>,
+    start: std::time::Instant,
+}
+
+impl Platform for SlintPlatform {
+    fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+        Ok(self.window.clone())
+    }
+
+    fn duration_since_start(&self) -> core::time::Duration {
+        self.start.elapsed()
+    }
+}
+
+// === HUD ===
+
+pub struct Hud {
+    window: Rc<MinimalSoftwareWindow>,
+    hud_instance: HudWindow,
+    buffer: Vec<Rgba8Pixel>,
+    width: u32,
+    height: u32,
+}
+
+impl Hud {
+    /// Must be called exactly once, before any Slint operations.
+    pub fn new(width: u32, height: u32) -> Self {
+        let sw_window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
+        sw_window.set_size(slint::PhysicalSize::new(width, height));
+
+        slint::platform::set_platform(Box::new(SlintPlatform {
+            window: sw_window.clone(),
+            start: std::time::Instant::now(),
+        }))
+        .expect("set_platform must be called once");
+
+        let hud_instance = HudWindow::new().unwrap();
+        let buffer = vec![Rgba8Pixel::default(); (width * height) as usize];
+
+        Self {
+            window: sw_window,
+            hud_instance,
+            buffer,
+            width,
+            height,
+        }
+    }
+
+    /// Render the HUD to the internal RGBA buffer. Returns the buffer as bytes.
+    pub fn render(&mut self) -> &[u8] {
+        // Clear buffer to transparent
+        self.buffer.fill(Rgba8Pixel::default());
+
+        self.window.draw_if_needed(|renderer| {
+            renderer.render(&mut self.buffer, self.width as usize);
+        });
+
+        // Safety: Rgba8Pixel is #[repr(C)] with 4 u8 fields
+        unsafe {
+            std::slice::from_raw_parts(
+                self.buffer.as_ptr() as *const u8,
+                self.buffer.len() * 4,
+            )
+        }
+    }
+
+    pub fn set_mode_text(&self, mode: &str) {
+        self.hud_instance.set_mode_text(SharedString::from(mode));
+    }
+
+    pub fn set_url_text(&self, url: &str) {
+        self.hud_instance.set_url_text(SharedString::from(url));
+    }
+
+    pub fn set_title_text(&self, title: &str) {
+        self.hud_instance.set_title_text(SharedString::from(title));
+    }
+
+    pub fn set_command_text(&self, text: &str) {
+        self.hud_instance.set_command_text(SharedString::from(text));
+    }
+
+    pub fn set_command_visible(&self, visible: bool) {
+        self.hud_instance.set_command_visible(visible);
+    }
+
+    pub fn set_tile_count(&self, count: i32) {
+        self.hud_instance.set_tile_count(count);
+    }
+
+    pub fn set_focused_index(&self, index: i32) {
+        self.hud_instance.set_focused_index(index);
+    }
+
+    pub fn set_hints(&self, hints: Vec<(String, f32, f32, bool)>) {
+        let model: Vec<HintLabel> = hints
+            .into_iter()
+            .map(|(label, x, y, active)| HintLabel {
+                label: SharedString::from(label),
+                x,
+                y,
+                active,
+            })
+            .collect();
+        let rc = Rc::new(VecModel::from(model));
+        self.hud_instance.set_hints(ModelRc::from(rc));
+    }
+
+    pub fn clear_hints(&self) {
+        let empty: Vec<HintLabel> = vec![];
+        let rc = Rc::new(VecModel::from(empty));
+        self.hud_instance.set_hints(ModelRc::from(rc));
+    }
+
+    pub fn resize(&mut self, width: u32, height: u32) {
+        self.width = width;
+        self.height = height;
+        self.buffer.resize((width * height) as usize, Rgba8Pixel::default());
+        self.window.set_size(slint::PhysicalSize::new(width, height));
+    }
+
+    pub fn request_redraw(&self) {
+        self.window.request_redraw();
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+}
+```
+
+- [ ] **Step 2: Verify it compiles**
+
+Run: `cargo build -p orthogonal-core`
+Expected: Compiles. The `slint::include_modules!()` macro generates `HudWindow` and `HintLabel` types from `ui/hud.slint` via the `build.rs`.
+
+If compilation fails with path errors in `build.rs`, adjust the path in `crates/orthogonal-core/build.rs` to point to the correct `.slint` file location.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add crates/orthogonal-core/src/hud.rs
+git commit -m "feat: implement Slint HUD bridge with software renderer"
+```
+
+---
+
+## Task 8: GL Compositor
+
+**Files:**
+- Modify: `crates/orthogonal-core/src/compositor.rs`
+
+- [ ] **Step 1: Implement the compositor**
+
+Replace `crates/orthogonal-core/src/compositor.rs` with:
+
+```rust
+use glow::HasContext;
+use crate::types::Rect;
+
+const VERTEX_SHADER: &str = r#"#version 330 core
+layout(location = 0) in vec2 a_pos;
+layout(location = 1) in vec2 a_uv;
+uniform vec4 u_rect; // (x, y, w, h) in 0..1 window coords
+out vec2 v_uv;
+void main() {
+    vec2 pos = a_pos * 0.5 + 0.5;
+    pos = u_rect.xy + pos * u_rect.zw;
+    pos = pos * 2.0 - 1.0;
+    gl_Position = vec4(pos, 0.0, 1.0);
+    v_uv = a_uv;
+}
+"#;
+
+const FRAGMENT_SHADER: &str = r#"#version 330 core
+in vec2 v_uv;
+uniform sampler2D u_texture;
+out vec4 frag_color;
+void main() {
+    frag_color = texture(u_texture, v_uv);
+}
+"#;
+
+pub struct Compositor {
+    program: glow::Program,
+    quad_vao: glow::VertexArray,
+    hud_texture: glow::Texture,
+    rect_loc: Option<glow::UniformLocation>,
+    tex_loc: Option<glow::UniformLocation>,
+    window_width: u32,
+    window_height: u32,
+}
+
+impl Compositor {
+    /// # Safety
+    /// Must be called with a valid, current GL context.
+    pub unsafe fn new(gl: &glow::Context, width: u32, height: u32) -> Self {
+        let program = Self::create_program(gl);
+        let quad_vao = Self::create_quad_vao(gl);
+        let hud_texture = Self::create_empty_texture(gl, width as i32, height as i32);
+        let rect_loc = gl.get_uniform_location(program, "u_rect");
+        let tex_loc = gl.get_uniform_location(program, "u_texture");
+
+        Self {
+            program,
+            quad_vao,
+            hud_texture,
+            rect_loc,
+            tex_loc,
+            window_width: width,
+            window_height: height,
+        }
+    }
+
+    /// Draw all tiles and the HUD overlay.
+    ///
+    /// # Safety
+    /// Must be called with a valid, current GL context.
+    pub unsafe fn draw(
+        &self,
+        gl: &glow::Context,
+        tiles: &[(Rect, glow::Texture)],
+        hud_buffer: &[u8],
+    ) {
+        gl.viewport(0, 0, self.window_width as i32, self.window_height as i32);
+        gl.clear_color(0.05, 0.05, 0.1, 1.0);
+        gl.clear(glow::COLOR_BUFFER_BIT);
+
+        gl.use_program(Some(self.program));
+        gl.uniform_1_i32(self.tex_loc.as_ref(), 0);
+        gl.active_texture(glow::TEXTURE0);
+        gl.bind_vertex_array(Some(self.quad_vao));
+
+        // Draw each tile
+        gl.disable(glow::BLEND);
+        let wf = self.window_width as f32;
+        let hf = self.window_height as f32;
+        for (rect, texture) in tiles {
+            let norm_x = rect.x / wf;
+            let norm_y = rect.y / hf;
+            let norm_w = rect.width / wf;
+            let norm_h = rect.height / hf;
+            gl.uniform_4_f32(self.rect_loc.as_ref(), norm_x, norm_y, norm_w, norm_h);
+            gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
+            gl.draw_arrays(glow::TRIANGLES, 0, 6);
+        }
+
+        // Draw HUD overlay with alpha blending
+        gl.enable(glow::BLEND);
+        gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+
+        gl.bind_texture(glow::TEXTURE_2D, Some(self.hud_texture));
+        gl.tex_sub_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            0,
+            0,
+            self.window_width as i32,
+            self.window_height as i32,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            glow::PixelUnpackData::Slice(Some(hud_buffer)),
+        );
+        gl.uniform_4_f32(self.rect_loc.as_ref(), 0.0, 0.0, 1.0, 1.0);
+        gl.draw_arrays(glow::TRIANGLES, 0, 6);
+
+        gl.disable(glow::BLEND);
+        gl.bind_vertex_array(None);
+    }
+
+    /// # Safety
+    /// Requires valid GL context.
+    pub unsafe fn resize(&mut self, gl: &glow::Context, width: u32, height: u32) {
+        self.window_width = width;
+        self.window_height = height;
+        gl.delete_texture(self.hud_texture);
+        self.hud_texture = Self::create_empty_texture(gl, width as i32, height as i32);
+    }
+
+    unsafe fn create_program(gl: &glow::Context) -> glow::Program {
+        let program = gl.create_program().expect("create program");
+        let shaders = [
+            (glow::VERTEX_SHADER, VERTEX_SHADER),
+            (glow::FRAGMENT_SHADER, FRAGMENT_SHADER),
+        ];
+        let compiled: Vec<glow::Shader> = shaders
+            .iter()
+            .map(|&(ty, src)| {
+                let shader = gl.create_shader(ty).expect("create shader");
+                gl.shader_source(shader, src);
+                gl.compile_shader(shader);
+                if !gl.get_shader_compile_status(shader) {
+                    panic!("Shader compile error: {}", gl.get_shader_info_log(shader));
+                }
+                gl.attach_shader(program, shader);
+                shader
+            })
+            .collect();
+        gl.link_program(program);
+        if !gl.get_program_link_status(program) {
+            panic!("Program link error: {}", gl.get_program_info_log(program));
+        }
+        for s in compiled {
+            gl.delete_shader(s);
+        }
+        program
+    }
+
+    unsafe fn create_quad_vao(gl: &glow::Context) -> glow::VertexArray {
+        #[rustfmt::skip]
+        let vertices: &[f32] = &[
+            // pos       uv
+            -1.0, -1.0,  0.0, 0.0,
+             1.0, -1.0,  1.0, 0.0,
+             1.0,  1.0,  1.0, 1.0,
+            -1.0, -1.0,  0.0, 0.0,
+             1.0,  1.0,  1.0, 1.0,
+            -1.0,  1.0,  0.0, 1.0,
+        ];
+        let bytes: &[u8] = core::slice::from_raw_parts(
+            vertices.as_ptr() as *const u8,
+            vertices.len() * core::mem::size_of::<f32>(),
+        );
+        let vao = gl.create_vertex_array().expect("create VAO");
+        gl.bind_vertex_array(Some(vao));
+        let vbo = gl.create_buffer().expect("create VBO");
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
+        gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytes, glow::STATIC_DRAW);
+        let stride = 4 * core::mem::size_of::<f32>() as i32;
+        gl.enable_vertex_attrib_array(0);
+        gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, stride, 0);
+        gl.enable_vertex_attrib_array(1);
+        gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, stride, 8);
+        gl.bind_vertex_array(None);
+        vao
+    }
+
+    unsafe fn create_empty_texture(gl: &glow::Context, width: i32, height: i32) -> glow::Texture {
+        let texture = gl.create_texture().expect("create texture");
+        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+        gl.tex_image_2d(
+            glow::TEXTURE_2D, 0, glow::RGBA as i32,
+            width, height, 0,
+            glow::RGBA, glow::UNSIGNED_BYTE,
+            glow::PixelUnpackData::Slice(None),
+        );
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+        texture
+    }
+}
+```
+
+- [ ] **Step 2: Verify it compiles**
+
+Run: `cargo build -p orthogonal-core`
+Expected: Compiles. Cannot unit test (needs GL context) — tested during integration (Task 12).
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add crates/orthogonal-core/src/compositor.rs
+git commit -m "feat: implement GL compositor with textured quad blitting and HUD overlay"
+```
+
+---
+
+## Task 9: Git Submodules (Servo + Ladybird)
+
+**Files:**
+- Create: `servo/` (git submodule)
+- Create: `ladybird/` (git submodule)
+
+- [ ] **Step 1: Add Servo submodule (shallow)**
+
+```bash
+cd /Users/enekosarasola/orthogonal
+git submodule add --depth 1 https://github.com/servo/servo.git servo
+```
+
+Expected: Clones Servo (large — ~2-3 GB even shallow). This will take several minutes.
+
+> **Note:** Servo may require a nightly Rust toolchain and system dependencies (Python 3, pkg-config, various C libraries). Check `servo/README.md` after cloning.
+
+- [ ] **Step 2: Add Ladybird submodule (shallow, reference only)**
+
+```bash
+git submodule add --depth 1 https://github.com/LadybirdBrowser/ladybird.git ladybird
+```
+
+Expected: Clones Ladybird repository. This is for reference only — not compiled or linked.
+
+- [ ] **Step 3: Add .gitignore entry for build artifacts in submodules**
+
+Ensure the root `.gitignore` has:
+
+```
+/target/
+servo/target/
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add .gitmodules servo ladybird .gitignore
+git commit -m "feat: add Servo and Ladybird as git submodules"
+```
+
+---
+
+## Task 10: Servo Facade Crate
+
+**Files:**
+- Create: `crates/orthogonal-servo/Cargo.toml`
+- Create: `crates/orthogonal-servo/src/lib.rs`
+- Create: `crates/orthogonal-servo/src/delegate.rs`
+- Create: `crates/orthogonal-servo/src/context.rs`
+- Create: `crates/orthogonal-servo/src/events.rs`
+- Modify: `Cargo.toml` (workspace — add member)
+
+> **Important context for implementers:** Servo's public API (as of 2026) uses a **delegate pattern**, not the old `WindowMethods`/`EmbedderMethods` traits. Key types:
+> - `ServoBuilder::default().event_loop_waker(waker).build() -> Servo`
+> - `Servo::set_delegate(Rc<dyn ServoDelegate>)`, `Servo::spin_event_loop()`
+> - `WebViewBuilder::new(&servo, rendering_context).url(url).delegate(delegate).build() -> WebView`
+> - `WebView::paint()`, `WebView::resize()`, `WebView::load()`, `WebView::notify_input_event()`, `WebView::evaluate_javascript()`
+> - `WindowRenderingContext::new(display_handle, window_handle, size)` — creates GL context via surfman
+> - `OffscreenRenderingContext::new(parent_context, size)` — creates FBO
+> - `WindowRenderingContext::glow_gl_api() -> Arc<glow::Context>` — for our compositor
+>
+> Read `servo/components/servo/lib.rs` and the `winit_minimal.rs` example in the servo repo for the exact current API.
+
+- [ ] **Step 1: Add `orthogonal-servo` to workspace**
+
+Add to the workspace `Cargo.toml` members:
+
+```toml
+[workspace]
+members = ["crates/orthogonal-core", "crates/orthogonal-app", "crates/orthogonal-servo"]
+```
+
+- [ ] **Step 2: Create `crates/orthogonal-servo/Cargo.toml`**
+
+```toml
+[package]
+name = "orthogonal-servo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+orthogonal-core = { path = "../orthogonal-core" }
+servo = { path = "../../servo/components/servo" }
+url = "2"
+log = "0.4"
+```
+
+> **Note:** The exact path to `servo`'s libservo crate may differ. Check `servo/components/servo/Cargo.toml` exists. If Servo restructured, find the crate that exports `ServoBuilder`, `WebView`, etc.
+
+- [ ] **Step 3: Implement `lib.rs`**
+
+Create `crates/orthogonal-servo/src/lib.rs`:
+
+```rust
+pub mod context;
+pub mod delegate;
+pub mod events;
+
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::sync::Arc;
+
+use orthogonal_core::types::*;
+use url::Url;
+
+pub use context::RenderContextManager;
+pub use delegate::{OrthoServoDelegate, OrthoWebViewDelegate};
+
+/// The Servo engine facade. Wraps all Servo interactions.
+pub struct Engine {
+    servo: servo::Servo,
+    ctx_manager: RenderContextManager,
+    tiles: HashMap<ViewId, TileHandle>,
+    next_id: u64,
+}
+
+struct TileHandle {
+    webview: servo::WebView,
+    // offscreen_context is managed by ctx_manager
+}
+
+impl Engine {
+    /// Create a new Engine. Call from the main thread with a valid window.
+    ///
+    /// # Arguments
+    /// * `display_handle` - from `winit::Window::display_handle()`
+    /// * `window_handle` - from `winit::Window::window_handle()`
+    /// * `size` - initial window size
+    /// * `waker` - EventLoopWaker that pokes Winit's event loop
+    pub fn new(
+        display_handle: raw_window_handle::DisplayHandle<'_>,
+        window_handle: raw_window_handle::WindowHandle<'_>,
+        size: (u32, u32),
+        waker: Box<dyn servo::embedder_traits::EventLoopWaker>,
+    ) -> Self {
+        let ctx_manager = RenderContextManager::new(display_handle, window_handle, size);
+
+        let servo = servo::ServoBuilder::default()
+            .event_loop_waker(waker)
+            .build();
+
+        let delegate = Rc::new(OrthoServoDelegate);
+        servo.set_delegate(delegate);
+
+        Self {
+            servo,
+            ctx_manager,
+            tiles: HashMap::new(),
+            next_id: 1,
+        }
+    }
+
+    pub fn create_tile(&mut self, url_str: &str) -> ViewId {
+        let id = ViewId(self.next_id);
+        self.next_id += 1;
+
+        let offscreen_ctx = self.ctx_manager.create_offscreen(800, 600);
+        let url = Url::parse(url_str).unwrap_or_else(|_| {
+            Url::parse(&format!("https://{}", url_str)).expect("invalid URL")
+        });
+
+        let delegate = Rc::new(OrthoWebViewDelegate::new(id));
+        let webview = servo::WebViewBuilder::new(&self.servo, offscreen_ctx)
+            .url(url)
+            .delegate(delegate)
+            .build();
+
+        self.tiles.insert(id, TileHandle { webview });
+        id
+    }
+
+    pub fn destroy_tile(&mut self, view_id: ViewId) {
+        self.tiles.remove(&view_id);
+        self.ctx_manager.destroy_offscreen(view_id);
+    }
+
+    pub fn resize_tile(&mut self, view_id: ViewId, width: u32, height: u32) {
+        if let Some(handle) = self.tiles.get(&view_id) {
+            self.ctx_manager.resize_offscreen(view_id, width, height);
+            handle.webview.resize(servo::webrender_api::units::DeviceIntSize::new(
+                width as i32,
+                height as i32,
+            ));
+        }
+    }
+
+    pub fn paint_tile(&self, view_id: ViewId) {
+        if let Some(handle) = self.tiles.get(&view_id) {
+            handle.webview.paint();
+        }
+    }
+
+    pub fn tile_texture(&self, view_id: ViewId) -> Option<glow::Texture> {
+        self.ctx_manager.texture_for(view_id)
+    }
+
+    pub fn navigate(&self, view_id: ViewId, url_str: &str) {
+        if let Some(handle) = self.tiles.get(&view_id) {
+            if let Ok(url) = Url::parse(url_str) {
+                handle.webview.load(url);
+            }
+        }
+    }
+
+    pub fn go_back(&self, view_id: ViewId) {
+        if let Some(handle) = self.tiles.get(&view_id) {
+            handle.webview.go_back(1);
+        }
+    }
+
+    pub fn go_forward(&self, view_id: ViewId) {
+        if let Some(handle) = self.tiles.get(&view_id) {
+            handle.webview.go_forward(1);
+        }
+    }
+
+    pub fn send_input(&self, view_id: ViewId, event: CoreKeyEvent) {
+        if let Some(handle) = self.tiles.get(&view_id) {
+            let servo_event = events::core_key_to_servo(&event);
+            handle.webview.notify_input_event(servo_event);
+        }
+    }
+
+    pub fn send_click(&self, view_id: ViewId, x: f32, y: f32) {
+        if let Some(handle) = self.tiles.get(&view_id) {
+            let click = events::click_at(x, y);
+            handle.webview.notify_input_event(click);
+        }
+    }
+
+    pub fn evaluate_js(
+        &self,
+        view_id: ViewId,
+        script: &str,
+        callback: Box<dyn FnOnce(Result<String, String>)>,
+    ) {
+        if let Some(handle) = self.tiles.get(&view_id) {
+            handle.webview.evaluate_javascript(
+                script.to_string(),
+                Box::new(move |result| {
+                    let mapped = result
+                        .map(|v| format!("{:?}", v))
+                        .map_err(|e| format!("{:?}", e));
+                    callback(mapped);
+                }),
+            );
+        }
+    }
+
+    pub fn spin(&mut self) {
+        self.servo.spin_event_loop();
+    }
+
+    pub fn gl_context(&self) -> Arc<glow::Context> {
+        self.ctx_manager.glow_context()
+    }
+
+    pub fn present(&self) {
+        self.ctx_manager.present();
+    }
+}
+```
+
+> **IMPORTANT for implementers:** The exact Servo API names (`ServoBuilder`, `WebViewBuilder`, method signatures) may differ from what's shown here. Read `servo/components/servo/lib.rs` to confirm. The structure is correct — adapt the method calls to match the actual API.
+
+- [ ] **Step 4: Implement `delegate.rs`**
+
+Create `crates/orthogonal-servo/src/delegate.rs`:
+
+```rust
+use std::rc::Rc;
+use orthogonal_core::types::ViewId;
+
+/// Engine-level delegate. Most methods are no-ops for v0.1.0.
+pub struct OrthoServoDelegate;
+
+impl servo::ServoDelegate for OrthoServoDelegate {
+    // Use default implementations for all methods.
+    // Override notify_error to log:
+    fn notify_error(&self, _: Option<servo::WebView>, error: String) {
+        log::error!("Servo error: {}", error);
+    }
+}
+
+/// Per-WebView delegate. Routes events back to the app.
+pub struct OrthoWebViewDelegate {
+    pub view_id: ViewId,
+}
+
+impl OrthoWebViewDelegate {
+    pub fn new(view_id: ViewId) -> Self {
+        Self { view_id }
+    }
+}
+
+impl servo::WebViewDelegate for OrthoWebViewDelegate {
+    fn notify_new_frame_ready(&self) {
+        log::trace!("New frame ready for {:?}", self.view_id);
+        // The waker (set on Engine) will poke the Winit event loop
+    }
+
+    fn notify_url_changed(&self, url: url::Url) {
+        log::debug!("URL changed for {:?}: {}", self.view_id, url);
+    }
+
+    fn notify_page_title_changed(&self, title: Option<String>) {
+        log::debug!("Title changed for {:?}: {:?}", self.view_id, title);
+    }
+
+    // All other ~25 methods use default no-op implementations.
+}
+```
+
+> **Note for implementers:** The delegate traits and method signatures must match the actual Servo source. Read `servo/components/servo/delegate.rs` or equivalent to get the exact signatures. The pattern above is correct; adapt method names as needed.
+
+- [ ] **Step 5: Implement `context.rs` (RenderingContext management)**
+
+Create `crates/orthogonal-servo/src/context.rs`:
+
+```rust
+use std::collections::HashMap;
+use std::sync::Arc;
+use orthogonal_core::types::ViewId;
+
+/// Manages the WindowRenderingContext and per-tile OffscreenRenderingContexts.
+pub struct RenderContextManager {
+    window_ctx: servo::WindowRenderingContext,
+    offscreen: HashMap<ViewId, servo::OffscreenRenderingContext>,
+}
+
+impl RenderContextManager {
+    pub fn new(
+        display_handle: raw_window_handle::DisplayHandle<'_>,
+        window_handle: raw_window_handle::WindowHandle<'_>,
+        size: (u32, u32),
+    ) -> Self {
+        let window_ctx = servo::WindowRenderingContext::new(
+            display_handle,
+            window_handle,
+            servo::webrender_api::units::DeviceIntSize::new(size.0 as i32, size.1 as i32),
+        );
+        Self {
+            window_ctx,
+            offscreen: HashMap::new(),
+        }
+    }
+
+    pub fn create_offscreen(&mut self, width: u32, height: u32) -> servo::OffscreenRenderingContext {
+        let ctx = servo::OffscreenRenderingContext::new(
+            &self.window_ctx,
+            servo::webrender_api::units::DeviceIntSize::new(width as i32, height as i32),
+        );
+        ctx
+    }
+
+    pub fn destroy_offscreen(&mut self, view_id: ViewId) {
+        self.offscreen.remove(&view_id);
+    }
+
+    pub fn resize_offscreen(&mut self, view_id: ViewId, width: u32, height: u32) {
+        if let Some(ctx) = self.offscreen.get_mut(&view_id) {
+            ctx.resize(servo::webrender_api::units::DeviceIntSize::new(
+                width as i32,
+                height as i32,
+            ));
+        }
+    }
+
+    pub fn texture_for(&self, view_id: ViewId) -> Option<glow::Texture> {
+        // The OffscreenRenderingContext's FBO color attachment
+        // Exact API depends on Servo — may need to call a method to get the texture ID
+        // Read servo's paint_api or OffscreenRenderingContext source for the accessor
+        todo!("Read Servo source to find how to get FBO texture from OffscreenRenderingContext")
+    }
+
+    pub fn glow_context(&self) -> Arc<glow::Context> {
+        self.window_ctx.glow_gl_api()
+    }
+
+    pub fn present(&self) {
+        self.window_ctx.present();
+    }
+}
+```
+
+> **Critical TODO for implementers:** The `texture_for` method needs the actual Servo API to extract the FBO texture from an `OffscreenRenderingContext`. Read `servo/components/servo/rendering_context.rs` (or wherever `OffscreenRenderingContext` is defined) to find the texture accessor. It may be `read_to_image()` (CPU readback) or there may be a `texture_id()` method. If only CPU readback is available, upload the image as a GL texture instead.
+
+- [ ] **Step 6: Implement `events.rs` (Winit → Servo event translation)**
+
+Create `crates/orthogonal-servo/src/events.rs`:
+
+```rust
+use orthogonal_core::types::*;
+
+/// Convert a core key event to a Servo InputEvent.
+/// Exact Servo types must be adapted from servo's embedder_traits.
+pub fn core_key_to_servo(event: &CoreKeyEvent) -> servo::InputEvent {
+    // Map CoreKey → Servo's keyboard event type
+    // Read servo/components/embedder_traits/input_events.rs for exact types
+    //
+    // The general pattern:
+    // servo::InputEvent::Keyboard(keyboard_event)
+    // where keyboard_event has key, code, state, modifiers, etc.
+    todo!("Map CoreKey to servo::InputEvent::Keyboard — read Servo source for exact types")
+}
+
+/// Generate a click InputEvent at the given coordinates.
+pub fn click_at(x: f32, y: f32) -> servo::InputEvent {
+    // servo::InputEvent::MouseButton(mouse_button_event)
+    // with position, button=Left, state=Click
+    todo!("Construct click event — read Servo source for exact types")
+}
+```
+
+> **Note for implementers:** These functions require reading Servo's `embedder_traits` crate to understand the exact `InputEvent` variants and their constructors. The implementation is straightforward mapping once you know the target types.
+
+- [ ] **Step 7: Verify the crate compiles (may need adjustments)**
+
+Run: `cargo build -p orthogonal-servo`
+Expected: Likely compilation errors due to Servo API mismatches. Fix by reading the actual Servo source in `servo/components/servo/` and adapting types and method calls.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add crates/orthogonal-servo/
+git commit -m "feat: implement Servo facade crate with engine, delegates, and rendering context"
+```
+
+---
+
+## Task 11: Winit Event Loop & App Orchestration
+
+**Files:**
+- Modify: `crates/orthogonal-app/src/main.rs`
+- Modify: `crates/orthogonal-app/src/app.rs`
+- Modify: `crates/orthogonal-app/Cargo.toml`
+
+- [ ] **Step 1: Update `orthogonal-app` Cargo.toml**
+
+```toml
+[package]
+name = "orthogonal-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+orthogonal-core = { path = "../orthogonal-core" }
+orthogonal-servo = { path = "../orthogonal-servo" }
+winit = "0.30"
+log = "0.4"
+env_logger = "0.11"
+```
+
+- [ ] **Step 2: Implement `main.rs`**
+
+Replace `crates/orthogonal-app/src/main.rs` with:
+
+```rust
+mod app;
+
+use winit::event_loop::{ControlFlow, EventLoop};
+
+#[derive(Debug)]
+pub enum UserEvent {
+    ServoTick,
+}
+
+fn main() {
+    env_logger::init();
+    log::info!("Starting Orthogonal v0.1.0");
+
+    let event_loop = EventLoop::<UserEvent>::with_user_event()
+        .build()
+        .expect("Failed to create event loop");
+    event_loop.set_control_flow(ControlFlow::Wait);
+
+    let proxy = event_loop.create_proxy();
+    let mut app = app::App::new(proxy);
+    event_loop.run_app(&mut app).expect("Event loop error");
+}
+```
+
+- [ ] **Step 3: Implement `app.rs`**
+
+Replace `crates/orthogonal-app/src/app.rs` with:
+
+```rust
+use winit::application::ApplicationHandler;
+use winit::event::WindowEvent;
+use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
+use winit::window::{Window, WindowAttributes, WindowId};
+
+use orthogonal_core::input::{Action, InputRouter, Mode};
+use orthogonal_core::layout::BspLayout;
+use orthogonal_core::view::ViewManager;
+use orthogonal_core::hint;
+use orthogonal_core::hud::Hud;
+use orthogonal_core::types::*;
+use orthogonal_servo::Engine;
+
+use crate::UserEvent;
+
+/// Wraps EventLoopProxy as a Servo EventLoopWaker.
+struct WinitWaker {
+    proxy: EventLoopProxy<UserEvent>,
+}
+
+impl servo::embedder_traits::EventLoopWaker for WinitWaker {
+    fn clone_box(&self) -> Box<dyn servo::embedder_traits::EventLoopWaker> {
+        Box::new(WinitWaker {
+            proxy: self.proxy.clone(),
+        })
+    }
+
+    fn wake(&self) {
+        let _ = self.proxy.send_event(UserEvent::ServoTick);
+    }
+}
+
+pub struct App {
+    proxy: EventLoopProxy<UserEvent>,
+    window: Option<Window>,
+    engine: Option<Engine>,
+    hud: Option<Hud>,
+    layout: BspLayout,
+    views: ViewManager,
+    input: InputRouter,
+    // Hint mode state
+    hint_elements: Vec<HintElement>,
+    hint_labels: Vec<String>,
+}
+
+impl App {
+    pub fn new(proxy: EventLoopProxy<UserEvent>) -> Self {
+        Self {
+            proxy,
+            window: None,
+            engine: None,
+            hud: None,
+            layout: BspLayout::new(Rect::default()),
+            views: ViewManager::new(),
+            input: InputRouter::new(),
+            hint_elements: Vec::new(),
+            hint_labels: Vec::new(),
+        }
+    }
+
+    fn dispatch_actions(&mut self, actions: Vec<Action>) {
+        for action in actions {
+            match action {
+                Action::FocusNeighbor(dir) => {
+                    if let Some(focused) = self.layout.focused() {
+                        if let Some(neighbor) = self.layout.focus_neighbor(focused, dir) {
+                            self.layout.set_focused(neighbor);
+                            self.update_hud();
+                        }
+                    }
+                }
+                Action::SplitView(dir) => {
+                    if let Some(focused) = self.layout.focused() {
+                        let new_id = self.layout.split(focused, dir);
+                        let view_id = self.views.create("about:blank");
+                        // Note: BSP assigns its own IDs. In a real impl,
+                        // coordinate BSP view_ids with ViewManager IDs.
+                        if let Some(engine) = &mut self.engine {
+                            engine.create_tile("about:blank");
+                        }
+                        self.update_hud();
+                        self.request_redraw();
+                    }
+                }
+                Action::CloseView => {
+                    if let Some(focused) = self.layout.focused() {
+                        self.layout.close(focused);
+                        self.views.remove(focused);
+                        if let Some(engine) = &mut self.engine {
+                            engine.destroy_tile(focused);
+                        }
+                        self.update_hud();
+                        self.request_redraw();
+                    }
+                }
+                Action::ResizeSplit(dir, delta) => {
+                    if let Some(focused) = self.layout.focused() {
+                        let signed_delta = match dir {
+                            Direction::Right | Direction::Down => delta,
+                            Direction::Left | Direction::Up => -delta,
+                        };
+                        self.layout.resize_split(focused, signed_delta);
+                        self.request_redraw();
+                    }
+                }
+                Action::ForwardToServo(key_event) => {
+                    if let Some(focused) = self.layout.focused() {
+                        if let Some(engine) = &self.engine {
+                            engine.send_input(focused, key_event);
+                        }
+                    }
+                }
+                Action::Navigate(url) => {
+                    if let Some(focused) = self.layout.focused() {
+                        if let Some(engine) = &self.engine {
+                            engine.navigate(focused, &url);
+                        }
+                    }
+                    self.update_hud();
+                }
+                Action::Back => {
+                    if let Some(focused) = self.layout.focused() {
+                        if let Some(engine) = &self.engine {
+                            engine.go_back(focused);
+                        }
+                    }
+                }
+                Action::Forward => {
+                    if let Some(focused) = self.layout.focused() {
+                        if let Some(engine) = &self.engine {
+                            engine.go_forward(focused);
+                        }
+                    }
+                }
+                Action::Reload => {
+                    // Servo doesn't have a reload method in the public API;
+                    // navigate to the current URL again.
+                    if let Some(focused) = self.layout.focused() {
+                        if let Some(view) = self.views.get(focused) {
+                            let url = view.url.clone();
+                            if let Some(engine) = &self.engine {
+                                engine.navigate(focused, &url);
+                            }
+                        }
+                    }
+                }
+                Action::EnterHintMode => {
+                    if let Some(focused) = self.layout.focused() {
+                        if let Some(engine) = &self.engine {
+                            // TODO: evaluate_js is async; need to handle callback
+                            // For now, use a placeholder
+                            engine.evaluate_js(
+                                focused,
+                                hint::HINT_QUERY_SCRIPT,
+                                Box::new(|result| {
+                                    // This callback fires during spin_event_loop
+                                    // Need to communicate back to App
+                                    log::debug!("Hint query result: {:?}", result);
+                                }),
+                            );
+                        }
+                    }
+                }
+                Action::ActivateHint(label) => {
+                    if let Some(idx) = self.hint_labels.iter().position(|l| l == &label) {
+                        if let Some(elem) = self.hint_elements.get(idx) {
+                            if let Some(focused) = self.layout.focused() {
+                                if let Some(engine) = &self.engine {
+                                    engine.send_click(focused, elem.x as f32, elem.y as f32);
+                                }
+                            }
+                        }
+                    }
+                    self.hint_elements.clear();
+                    self.hint_labels.clear();
+                    if let Some(hud) = &self.hud {
+                        hud.clear_hints();
+                    }
+                    self.update_hud();
+                }
+                Action::HintCharTyped(_) => {
+                    // Update HUD hint display with filtered labels
+                    self.update_hint_display();
+                }
+                Action::EnterInsert | Action::EnterCommand | Action::ExitToNormal => {
+                    self.update_hud();
+                }
+                Action::SaveSession => {
+                    // TODO: wire up session manager
+                }
+                Action::RestoreSession => {
+                    // TODO: wire up session manager
+                }
+                Action::Quit => {
+                    // TODO: exit event loop
+                }
+            }
+        }
+    }
+
+    fn update_hud(&self) {
+        if let Some(hud) = &self.hud {
+            let mode_str = match self.input.mode() {
+                Mode::Normal => "NORMAL",
+                Mode::Insert => "INSERT",
+                Mode::Command { .. } => "COMMAND",
+                Mode::Hint { .. } => "HINT",
+            };
+            hud.set_mode_text(mode_str);
+
+            if let Mode::Command { buffer } = self.input.mode() {
+                hud.set_command_visible(true);
+                hud.set_command_text(buffer);
+            } else {
+                hud.set_command_visible(false);
+            }
+
+            let tile_count = self.layout.resolve().len();
+            hud.set_tile_count(tile_count as i32);
+
+            if let Some(focused) = self.layout.focused() {
+                if let Some(view) = self.views.get(focused) {
+                    hud.set_url_text(&view.url);
+                    hud.set_title_text(&view.title);
+                }
+            }
+
+            hud.request_redraw();
+        }
+    }
+
+    fn update_hint_display(&self) {
+        if let Some(hud) = &self.hud {
+            if let Mode::Hint { filter, labels } = self.input.mode() {
+                let display: Vec<(String, f32, f32, bool)> = labels
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, label)| {
+                        self.hint_elements.get(i).map(|elem| {
+                            let active = label.starts_with(filter.as_str());
+                            (label.clone(), elem.x as f32, elem.y as f32, active)
+                        })
+                    })
+                    .collect();
+                hud.set_hints(display);
+                hud.request_redraw();
+            }
+        }
+    }
+
+    fn request_redraw(&self) {
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
+
+    fn convert_key_event(&self, event: &winit::event::KeyEvent) -> Option<CoreKeyEvent> {
+        use winit::keyboard::{Key, NamedKey};
+        let state = match event.state {
+            winit::event::ElementState::Pressed => KeyState::Pressed,
+            winit::event::ElementState::Released => KeyState::Released,
+        };
+        let key = match &event.logical_key {
+            Key::Named(NamedKey::Escape) => CoreKey::Escape,
+            Key::Named(NamedKey::Enter) => CoreKey::Enter,
+            Key::Named(NamedKey::Backspace) => CoreKey::Backspace,
+            Key::Named(NamedKey::Tab) => CoreKey::Tab,
+            Key::Named(NamedKey::ArrowLeft) => CoreKey::Left,
+            Key::Named(NamedKey::ArrowRight) => CoreKey::Right,
+            Key::Named(NamedKey::ArrowUp) => CoreKey::Up,
+            Key::Named(NamedKey::ArrowDown) => CoreKey::Down,
+            Key::Character(c) => {
+                let ch = c.chars().next()?;
+                CoreKey::Char(ch)
+            }
+            _ => return None,
+        };
+        // TODO: read actual modifier state from winit
+        let modifiers = Modifiers::default();
+        Some(CoreKeyEvent { key, state, modifiers })
+    }
+}
+
+impl ApplicationHandler<UserEvent> for App {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        let window = event_loop
+            .create_window(
+                WindowAttributes::default()
+                    .with_title("Orthogonal")
+                    .with_inner_size(winit::dpi::PhysicalSize::new(1280u32, 720u32)),
+            )
+            .expect("Failed to create window");
+
+        let size = window.inner_size();
+
+        // Initialize Servo engine
+        use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
+        let display_handle = window.display_handle().unwrap();
+        let window_handle = window.window_handle().unwrap();
+        let waker = Box::new(WinitWaker { proxy: self.proxy.clone() });
+
+        let engine = Engine::new(display_handle, window_handle, (size.width, size.height), waker);
+
+        // Initialize HUD
+        let hud = Hud::new(size.width, size.height);
+
+        // Initialize layout
+        self.layout = BspLayout::new(Rect::new(0.0, 0.0, size.width as f32, size.height as f32));
+
+        // Create first tile
+        let view_id = self.views.create("https://servo.org");
+        self.layout.add_first_view(view_id);
+        // engine.create_tile("https://servo.org"); // uncomment when servo facade is ready
+
+        self.window = Some(window);
+        self.engine = Some(engine);
+        self.hud = Some(hud);
+        self.update_hud();
+    }
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        match event {
+            WindowEvent::CloseRequested => event_loop.exit(),
+
+            WindowEvent::KeyboardInput { event, .. } => {
+                if let Some(core_event) = self.convert_key_event(&event) {
+                    let actions = self.input.handle(&core_event);
+                    self.dispatch_actions(actions);
+                }
+            }
+
+            WindowEvent::Resized(size) => {
+                self.layout.set_viewport(Rect::new(
+                    0.0, 0.0,
+                    size.width as f32, size.height as f32,
+                ));
+                // Resize each tile in the engine
+                let resolved = self.layout.resolve();
+                if let Some(engine) = &mut self.engine {
+                    for (view_id, rect) in &resolved {
+                        engine.resize_tile(*view_id, rect.width as u32, rect.height as u32);
+                    }
+                }
+                if let Some(hud) = &mut self.hud {
+                    hud.resize(size.width, size.height);
+                }
+                self.request_redraw();
+            }
+
+            WindowEvent::RedrawRequested => {
+                if let (Some(engine), Some(hud)) = (&self.engine, &mut self.hud) {
+                    let gl = engine.gl_context();
+                    let resolved = self.layout.resolve();
+
+                    // Paint all dirty tiles
+                    for (view_id, _) in &resolved {
+                        engine.paint_tile(*view_id);
+                    }
+
+                    // Collect tile textures for compositor
+                    let tile_textures: Vec<(Rect, glow::Texture)> = resolved
+                        .iter()
+                        .filter_map(|(view_id, rect)| {
+                            engine.tile_texture(*view_id).map(|tex| (*rect, tex))
+                        })
+                        .collect();
+
+                    // Render HUD overlay
+                    let hud_buffer = hud.render();
+
+                    // Composite — done via the Compositor (initialize lazily)
+                    // For now, just present
+                    engine.present();
+                }
+            }
+
+            _ => {}
+        }
+    }
+
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
+        match event {
+            UserEvent::ServoTick => {
+                if let Some(engine) = &mut self.engine {
+                    engine.spin();
+                }
+                self.request_redraw();
+            }
+        }
+    }
+}
+```
+
+> **Note for implementers:** The `App` struct has several TODO items:
+> 1. Modifier key state tracking (currently defaults to no modifiers)
+> 2. Session manager wiring
+> 3. Hint mode callback communication (the JS eval callback fires during `spin_event_loop` but needs to communicate hint elements back to the app)
+> 4. Compositor integration (currently calls `engine.present()` directly)
+>
+> These are wiring issues to resolve during integration testing.
+
+- [ ] **Step 4: Verify it compiles**
+
+Run: `cargo build --workspace`
+Expected: Should compile once Servo facade API is stable. Fix any type mismatches.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add crates/orthogonal-app/
+git commit -m "feat: implement Winit event loop and app orchestration"
+```
+
+---
+
+## Task 12: Integration Smoke Test
+
+- [ ] **Step 1: Run the browser**
+
+```bash
+cargo run -p orthogonal-app
+```
+
+Expected: A window opens titled "Orthogonal". Servo begins loading `https://servo.org`. The status bar shows "NORMAL" mode indicator.
+
+- [ ] **Step 2: Test mode switching**
+
+In the window:
+- Press `i` → status bar should show "INSERT" (orange)
+- Press `Esc` → back to "NORMAL" (green)
+- Press `:` → command bar appears at bottom
+- Type `open https://example.com` + Enter → page navigates
+- Press `Esc` → command bar disappears
+
+- [ ] **Step 3: Test tiling**
+
+- Press `Ctrl+V` → window splits vertically into two tiles
+- Press `l` → focus moves to right tile
+- Press `h` → focus moves back to left tile
+- Press `q` → right tile closes, left tile takes full width
+
+- [ ] **Step 4: Test hint mode**
+
+- Press `f` → hint labels appear over clickable elements
+- Type a label (e.g., `as`) → the corresponding link is clicked
+- Test `Esc` to cancel hint mode
+
+- [ ] **Step 5: Fix any issues found**
+
+Iterate on bugs discovered during manual testing. Common issues:
+- GL texture orientation (flip Y in vertex shader if tiles render upside-down)
+- Coordinate space mismatches between Servo, BSP rects, and the compositor
+- Servo initialization failures (check system dependencies)
+
+- [ ] **Step 6: Final commit**
+
+```bash
+git add -A
+git commit -m "fix: integration fixes from smoke testing"
+```
+
+---
+
+## Appendix: Key Reference Files in Servo
+
+When implementing Tasks 10-11, consult these files in the `servo/` submodule:
+
+| File | Contains |
+|------|----------|
+| `components/servo/lib.rs` | `Servo`, `ServoBuilder`, `WebView`, `WebViewBuilder` public API |
+| `components/servo/delegate.rs` | `ServoDelegate`, `WebViewDelegate` trait definitions |
+| `components/shared/embedder_traits/` | `EventLoopWaker`, `InputEvent`, and related types |
+| `components/shared/paint_api/` | `RenderingContext` trait, `WindowRenderingContext`, `OffscreenRenderingContext` |
+| `ports/servoshell/` | Reference embedder (Servo's own shell) — useful patterns |
+| `examples/winit_minimal.rs` | Minimal Winit-based embedder example (if present) |
+
+## Appendix: Session Manager Data Location
+
+```rust
+fn session_db_path() -> std::path::PathBuf {
+    let base = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let dir = base.join("orthogonal");
+    std::fs::create_dir_all(&dir).ok();
+    dir.join("sessions.db")
+}
+```

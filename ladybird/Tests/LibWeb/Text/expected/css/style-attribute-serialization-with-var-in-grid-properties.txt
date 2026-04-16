@@ -1,0 +1,1 @@
+grid-template: var(--foo) var(--baz) var(--bar);

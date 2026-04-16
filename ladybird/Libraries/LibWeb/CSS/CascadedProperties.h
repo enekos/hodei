@@ -1,0 +1,57 @@
+/*
+ * Copyright (c) 2024, Andreas Kling <andreas@ladybird.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/FixedBitmap.h>
+#include <LibGC/CellAllocator.h>
+#include <LibJS/Heap/Cell.h>
+#include <LibWeb/CSS/CascadeOrigin.h>
+#include <LibWeb/CSS/PropertyID.h>
+#include <LibWeb/CSS/Selector.h>
+#include <LibWeb/CSS/StyleProperty.h>
+#include <LibWeb/CSS/StyleValues/StyleValue.h>
+
+namespace Web::CSS {
+
+class CascadedProperties final : public JS::Cell {
+    GC_CELL(CascadedProperties, JS::Cell);
+    GC_DECLARE_ALLOCATOR(CascadedProperties);
+
+public:
+    virtual ~CascadedProperties() override;
+
+    [[nodiscard]] RefPtr<StyleValue const> property(PropertyID) const;
+    [[nodiscard]] PropertyID property_with_higher_priority(PropertyID, PropertyID) const;
+    [[nodiscard]] GC::Ptr<CSSStyleDeclaration const> property_source(PropertyID) const;
+    [[nodiscard]] Optional<StyleProperty> style_property(PropertyID) const;
+
+    void set_property(PropertyID, NonnullRefPtr<StyleValue const>, Important, CascadeOrigin, Optional<FlyString> layer_name, GC::Ptr<CSS::CSSStyleDeclaration const> source);
+    void set_property_from_presentational_hint(PropertyID, NonnullRefPtr<StyleValue const>);
+
+    void revert_property(PropertyID, Important, CascadeOrigin);
+    void revert_layer_property(PropertyID, Important, Optional<FlyString> layer_name);
+
+    void resolve_unresolved_properties(DOM::AbstractElement);
+
+private:
+    CascadedProperties();
+
+    virtual void visit_edges(Visitor&) override;
+
+    struct Entry {
+        StyleProperty property;
+        size_t cascade_index { 0 };
+        CascadeOrigin origin;
+        Optional<FlyString> layer_name;
+        GC::Ptr<CSS::CSSStyleDeclaration const> source;
+    };
+    HashMap<PropertyID, Vector<Entry>> m_properties;
+    size_t m_next_cascade_index { 0 };
+    AK::FixedBitmap<to_underlying(last_longhand_property_id) + 1> m_contained_properties_cache { false };
+};
+
+}

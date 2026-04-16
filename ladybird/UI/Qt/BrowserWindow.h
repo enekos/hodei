@@ -1,0 +1,183 @@
+/*
+ * Copyright (c) 2022, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2023, Linus Groh <linusg@serenityos.org>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibWeb/HTML/ActivateTab.h>
+#include <LibWeb/HTML/AudioPlayState.h>
+#include <LibWebView/Forward.h>
+#include <UI/Qt/Tab.h>
+#include <UI/Qt/TabBar.h>
+
+#include <QIcon>
+#include <QMainWindow>
+#include <QPushButton>
+#include <QTabBar>
+
+class QPropertyAnimation;
+
+namespace Ladybird {
+
+class Tab;
+class WebContentView;
+class BrowserWindow;
+
+class ExitFullscreenButton : public QPushButton {
+    Q_OBJECT
+
+public:
+    ExitFullscreenButton(QWidget* parent = nullptr);
+    ~ExitFullscreenButton() override = default;
+    void animate_show();
+
+private:
+    QPropertyAnimation* m_widget_animation;
+};
+
+// Handles Qt UI state related to when Ladybird has entered fullscreen,
+// like displaying an exit button, listening for escape key presses and so on
+class FullscreenMode : public QObject {
+    Q_OBJECT
+
+public:
+    static constexpr int button_animation_time() { return 750; }
+    explicit FullscreenMode(BrowserWindow* window, ExitFullscreenButton* exit_button);
+
+    enum class ExitInitiatedBy {
+        UI,
+        WebContent,
+    };
+
+    void exit(ExitInitiatedBy);
+    void enter(Tab* tab);
+    // Called after a window change event that has identifed the current window state to be fullscreen.
+    void entered_fullscreen();
+    bool is_api_fullscreen() const;
+signals:
+    void on_exit_fullscreen();
+
+protected:
+    // FullscreenMode's eventFilter is responsible for things that need to happen when a document
+    // is in "fullscreen API fullscreen", like exiting when pushing escape, showing the exit button
+    virtual bool eventFilter(QObject* obj, QEvent* event) override;
+
+private:
+    bool debounce() const;
+    // Called when in fullscreen. Displays exit fullscreen button if mouse comes close to the top of the screen.
+    void maybe_animate_show_exit_button(QPointF pos);
+    BrowserWindow* m_window;
+    ExitFullscreenButton* m_exit_button;
+    // Never access this directly. First check m_window->tab_index(m_fullscreen_tab) != -1, to verify it's liveness.
+    Tab* m_fullscreen_tab { nullptr };
+    bool m_debounce { false };
+};
+
+class BrowserWindow : public QMainWindow {
+    Q_OBJECT
+
+public:
+    enum class IsPopupWindow {
+        No,
+        Yes,
+    };
+
+    BrowserWindow(Vector<URL::URL> const& initial_urls, IsPopupWindow is_popup_window = IsPopupWindow::No, Tab* parent_tab = nullptr, Optional<u64> page_index = {});
+
+    WebContentView& view() const { return m_current_tab->view(); }
+
+    int tab_count() { return m_tabs_container->count(); }
+    int tab_index(Tab*);
+
+    Tab& create_new_tab(Web::HTML::ActivateTab activate_tab);
+    Tab* current_tab() const { return m_current_tab; }
+    FullscreenMode& fullscreen_mode();
+
+    QMenu& hamburger_menu() const { return *m_hamburger_menu; }
+
+    QAction& new_tab_action() const { return *m_new_tab_action; }
+    QAction& new_window_action() const { return *m_new_window_action; }
+    QAction& find_action() const { return *m_find_in_page_action; }
+
+    void rebuild_bookmarks_menu();
+    void update_bookmarks_bar_display(bool show_bookmarks_bar);
+
+    double refresh_rate() const { return m_refresh_rate; }
+
+    void on_devtools_enabled();
+    void on_devtools_disabled();
+
+public slots:
+    void device_pixel_ratio_changed(qreal dpi);
+    void refresh_rate_changed(qreal refresh_rate);
+    void tab_title_changed(int index, QString const&);
+    void tab_favicon_changed(int index, QIcon const& icon);
+    void tab_audio_play_state_changed(int index, Web::HTML::AudioPlayState);
+    Tab& new_tab_from_url(URL::URL const&, Web::HTML::ActivateTab);
+    Tab& new_child_tab(Web::HTML::ActivateTab, Tab& parent, Optional<u64> page_index);
+    void activate_tab(int index);
+    void definitely_close_tab(int index);
+    void move_tab(int old_index, int new_index);
+    void request_to_close_tab(int index);
+    void request_to_close_current_tab();
+    void open_next_tab();
+    void open_previous_tab();
+    void open_file();
+    void show_find_in_page();
+    void enter_fullscreen();
+    void exit_fullscreen();
+
+private:
+    virtual bool event(QEvent*) override;
+    virtual void resizeEvent(QResizeEvent*) override;
+    virtual void changeEvent(QEvent* event) override;
+    virtual void moveEvent(QMoveEvent*) override;
+    virtual void wheelEvent(QWheelEvent*) override;
+    virtual void closeEvent(QCloseEvent*) override;
+
+    Tab& create_new_tab(Web::HTML::ActivateTab, Tab& parent, Optional<u64> page_index);
+    void initialize_tab(Tab*);
+
+    void set_current_tab(Tab* tab);
+
+    template<typename Callback>
+    void for_each_tab(Callback&& callback)
+    {
+        for (int i = 0; i < m_tabs_container->count(); ++i)
+            callback(*m_tabs_container->tab(i));
+    }
+
+    void create_close_button_for_tab(Tab*);
+
+    QIcon icon_for_page_mute_state(Tab&) const;
+    QString tool_tip_for_page_mute_state(Tab&) const;
+    QTabBar::ButtonPosition audio_button_position_for_tab(int tab_index) const;
+
+    void set_window_rect(Optional<Web::DevicePixels> x, Optional<Web::DevicePixels> y, Optional<Web::DevicePixels> width, Optional<Web::DevicePixels> height);
+
+    QScreen* m_current_screen { nullptr };
+    double m_device_pixel_ratio { 0 };
+    double m_refresh_rate { 60.0 };
+
+    TabWidget* m_tabs_container { nullptr };
+    Tab* m_current_tab { nullptr };
+
+    QMenu* m_hamburger_menu { nullptr };
+    QMenu* m_bookmarks_menu { nullptr };
+
+    QAction* m_new_tab_action { nullptr };
+    QAction* m_new_window_action { nullptr };
+    QAction* m_find_in_page_action { nullptr };
+
+    IsPopupWindow m_is_popup_window { IsPopupWindow::No };
+
+    ExitFullscreenButton* m_exit_button { nullptr };
+    FullscreenMode* m_fullscreen_mode { nullptr };
+    // Determine if window should restore to maximized or normal, when exiting fullscreen.
+    bool m_restore_to_maximized { false };
+};
+
+}

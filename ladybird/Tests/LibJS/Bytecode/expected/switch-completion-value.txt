@@ -1,0 +1,110 @@
+$bb1bc930 switch-completion-value.js:1:1
+  Registers: 11
+  Blocks:    1
+  Constants:
+    [0] = Undefined
+    [1] = String("switch(1) { case 1: 'hello'; let x = 1; }")
+    [2] = String("switch(1) { case 1: 'first'; 'second'; }")
+    [3] = String("switch(1) { case 1: 'matched'; break; default: 'default'; }")
+
+block0:
+  [   0] GetGlobal dst:reg6, `console`
+  [  18] GetById dst:reg7, base:reg6, `log` (console.log)
+  [  38] GetGlobal dst:reg9, `eval`
+  [  50] CallDirectEval dst:reg8, callee:reg9, this_value:Undefined, eval, arguments:[String("switch(1) { case 1: 'hello'; let x = 1; }")]
+  [  78] Call dst:reg5, callee:reg7, this_value:reg6, console.log, arguments:[reg8]
+  [  a0] GetGlobal dst:reg7, `console`
+  [  b8] GetById dst:reg8, base:reg7, `log` (console.log)
+  [  d8] GetGlobal dst:reg10, `eval`
+  [  f0] CallDirectEval dst:reg9, callee:reg10, this_value:Undefined, eval, arguments:[String("switch(1) { case 1: 'first'; 'second'; }")]
+  [ 118] Call dst:reg6, callee:reg8, this_value:reg7, console.log, arguments:[reg9]
+  [ 140] GetGlobal dst:reg7, `console`
+  [ 158] GetById dst:reg8, base:reg7, `log` (console.log)
+  [ 178] GetGlobal dst:reg10, `eval`
+  [ 190] CallDirectEval dst:reg9, callee:reg10, this_value:Undefined, eval, arguments:[String("switch(1) { case 1: 'matched'; break; default: 'default'; }")]
+  [ 1b8] Call dst:reg5, callee:reg8, this_value:reg7, console.log, arguments:[reg9]
+  [ 1e0] End value:reg5
+
+
+eval$802caa65 line 1, column 1
+  Registers: 7
+  Blocks:    5
+  Locals:    x~0
+  Constants:
+    [0] = Undefined
+    [1] = Int32(1)
+    [2] = String("hello")
+
+block0:
+  [   0] Mov dst:reg5, src:Undefined
+
+block1:
+  [  10] JumpStrictlyEquals lhs:Int32(1), rhs:Int32(1), true_target:block3, false_target:block2
+
+block2:
+  [  28] End value:reg5
+
+block3:
+  [  30] Mov2 dst1:reg5, src1:String("hello"), dst2:x~0, src2:Int32(1)
+
+block4:
+  [  48] End value:reg5
+
+
+eval$e4733afc line 1, column 1
+  Registers: 7
+  Blocks:    5
+  Constants:
+    [0] = Undefined
+    [1] = Int32(1)
+    [2] = String("first")
+    [3] = String("second")
+
+block0:
+  [   0] Mov dst:reg5, src:Undefined
+
+block1:
+  [  10] JumpStrictlyEquals lhs:Int32(1), rhs:Int32(1), true_target:block3, false_target:block2
+
+block2:
+  [  28] End value:reg5
+
+block3:
+  [  30] Mov2 dst1:reg5, src1:String("first"), dst2:reg5, src2:String("second")
+
+block4:
+  [  48] End value:reg5
+
+
+eval$94daef6a line 1, column 1
+  Registers: 7
+  Blocks:    6
+  Constants:
+    [0] = Undefined
+    [1] = Int32(1)
+    [2] = String("matched")
+    [3] = String("default")
+
+block0:
+  [   0] Mov dst:reg5, src:Undefined
+
+block1:
+  [  10] JumpStrictlyEquals lhs:Int32(1), rhs:Int32(1), true_target:block3, false_target:block2
+
+block2:
+  [  28] Jump target:block4
+
+block3:
+  [  30] Mov dst:reg5, src:String("matched")
+  [  40] End value:reg5
+
+block4:
+  [  48] Mov dst:reg5, src:String("default")
+
+block5:
+  [  58] End value:reg5
+
+
+"hello"
+"second"
+"matched"

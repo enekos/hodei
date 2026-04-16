@@ -1,0 +1,8 @@
+#import <CSS/CSSRule.idl>
+
+// https://drafts.csswg.org/cssom/#the-cssnamespacerule-interface
+[Exposed=Window]
+interface CSSNamespaceRule : CSSRule {
+    readonly attribute CSSOMString namespaceURI;
+    readonly attribute CSSOMString prefix;
+};

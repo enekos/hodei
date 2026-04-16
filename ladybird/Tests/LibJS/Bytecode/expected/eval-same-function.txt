@@ -1,0 +1,39 @@
+$e6445d4a eval-same-function.js:10:1
+  Registers: 7
+  Blocks:    1
+  Constants:
+    [0] = Undefined
+
+block0:
+  [   0] GetGlobal dst:reg6, `foo`
+  [  18] Call dst:reg5, callee:reg6, this_value:Undefined, foo
+  [  38] End value:reg5
+
+
+foo$a4ff2c4f eval-same-function.js:6:9
+  Registers: 8
+  Blocks:    1
+  Constants:
+    [0] = String("var x = 1")
+    [1] = Undefined
+    [2] = Int32(42)
+
+block0:
+  [   0] CreateArguments is_immutable:false
+  [  10] GetCalleeAndThisFromEnvironment callee:reg6, this_value:reg7, `eval`
+  [  28] CallDirectEval dst:reg5, callee:reg6, this_value:reg7, eval, arguments:[String("var x = 1")]
+  [  50] GetBinding dst:reg6, `Number`
+  [  68] CallConstruct dst:reg5, callee:reg6, Number, arguments:[Int32(42)]
+  [  88] Return value:reg5
+
+
+eval$3c61584c line 1, column 1
+  Registers: 5
+  Blocks:    1
+  Constants:
+    [0] = Int32(1)
+    [1] = Undefined
+
+block0:
+  [   0] SetLexicalBinding `x`, src:Int32(1)
+  [  18] End value:Undefined

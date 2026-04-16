@@ -1,0 +1,99 @@
+export struct HintLabel {
+    label: string,
+    x: length,
+    y: length,
+    active: bool,
+}
+
+export component HudWindow inherits Window {
+    background: transparent;
+
+    in property <string> mode-text: "NORMAL";
+    in property <string> url-text: "";
+    in property <string> title-text: "";
+    in property <string> command-text: "";
+    in property <bool> command-visible: false;
+    in property <int> tile-count: 1;
+    in property <int> focused-index: 0;
+    in property <[HintLabel]> hints: [];
+
+    // Status bar at bottom
+    Rectangle {
+        y: parent.height - 24px;
+        width: parent.width;
+        height: 24px;
+        background: #1a1a2eee;
+
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+
+            Text {
+                text: root.title-text != "" ? root.title-text + " \u{2014} " + root.url-text : root.url-text;
+                color: #e0e0e0;
+                font-size: 12px;
+                overflow: elide;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+
+            Text {
+                text: "[" + root.tile-count + "]";
+                color: #808080;
+                font-size: 12px;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+            }
+
+            Text {
+                text: root.mode-text;
+                color: root.mode-text == "NORMAL" ? #00ff88 :
+                       root.mode-text == "INSERT" ? #ff8800 :
+                       root.mode-text == "HINT" ? #ff00ff : #ffff00;
+                font-size: 12px;
+                font-weight: 700;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                min-width: 70px;
+            }
+        }
+    }
+
+    // Command bar (above status bar, visible only in command mode)
+    Rectangle {
+        visible: root.command-visible;
+        y: parent.height - 48px;
+        width: parent.width;
+        height: 24px;
+        background: #0d0d1aee;
+
+        Text {
+            x: 8px;
+            text: ":" + root.command-text;
+            color: white;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+    }
+
+    // Hint labels overlay
+    for hint in root.hints: Rectangle {
+        x: hint.x;
+        y: hint.y;
+        width: 28px;
+        height: 20px;
+        background: hint.active ? #ff4444dd : #ff444466;
+        border-radius: 3px;
+
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: hint.label;
+            color: white;
+            font-size: 11px;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}

@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<link rel="match" href="../expected/mask-image-with-scroll-offset-ref.html" />
+<style>
+* { scrollbar-width: none; }
+body { height: 200vh; }
+#spacer { height: 100px; }
+#mask-image-box {
+  background-color: green;
+  width: 100px;
+  height: 200px;
+  mask-image: url("../data/mask-image-100x200.png");
+}
+</style>
+<div id="spacer"></div>
+<div id="mask-image-box"></div>
+<script>
+    window.scrollTo(0, 100);
+</script>

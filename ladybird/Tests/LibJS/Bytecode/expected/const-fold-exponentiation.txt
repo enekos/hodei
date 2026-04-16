@@ -1,0 +1,20 @@
+$68a257fc const-fold-exponentiation.js:1:1
+  Registers: 5
+  Blocks:    1
+  Constants:
+    [0] = Int32(1)
+    [1] = Int32(-1)
+    [2] = Double(inf)
+    [3] = Double(nan)
+    [4] = Double(-inf)
+    [5] = Int32(2)
+    [6] = Int32(10)
+    [7] = Int32(1024)
+    [8] = Undefined
+
+block0:
+  [   0] InitializeLexicalBinding `a`, src:Double(nan)
+  [  18] InitializeLexicalBinding `b`, src:Double(nan)
+  [  30] InitializeLexicalBinding `c`, src:Double(nan)
+  [  48] InitializeLexicalBinding `d`, src:Int32(1024)
+  [  60] End value:Undefined

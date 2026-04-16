@@ -1,0 +1,6 @@
+[submodule "servo"]
+	path = servo
+	url = https://github.com/servo/servo.git
+[submodule "ladybird"]
+	path = ladybird
+	url = https://github.com/LadybirdBrowser/ladybird.git

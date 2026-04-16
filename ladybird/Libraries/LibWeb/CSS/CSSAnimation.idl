@@ -1,0 +1,7 @@
+#import <Animations/Animation.idl>
+
+// https://drafts.csswg.org/css-animations-2/#cssanimation
+[Exposed=Window]
+interface CSSAnimation : Animation {
+    readonly attribute CSSOMString animationName;
+};

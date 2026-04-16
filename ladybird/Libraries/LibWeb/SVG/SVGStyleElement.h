@@ -1,0 +1,40 @@
+/*
+ * Copyright (c) 2023, Preston Taylor <PrestonLeeTaylor@proton.me>
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <LibWeb/DOM/StyleElementBase.h>
+#include <LibWeb/SVG/SVGElement.h>
+
+namespace Web::SVG {
+
+class SVGStyleElement final
+    : public SVGElement
+    , public DOM::StyleElementBase {
+    WEB_PLATFORM_OBJECT(SVGStyleElement, SVGElement);
+    GC_DECLARE_ALLOCATOR(SVGStyleElement);
+
+public:
+    virtual ~SVGStyleElement() override;
+
+    virtual void children_changed(ChildrenChangedMetadata const&) override;
+    virtual void inserted() override;
+    virtual void removed_from(Node* old_parent, Node& old_root) override;
+
+private:
+    SVGStyleElement(DOM::Document&, DOM::QualifiedName);
+
+    // ^DOM::Node
+    virtual bool is_svg_style_element() const override { return true; }
+
+    // ^DOM::StyleElementBase
+    virtual Element& as_element() override { return *this; }
+
+    virtual void initialize(JS::Realm&) override;
+    virtual void visit_edges(Cell::Visitor&) override;
+};
+
+}

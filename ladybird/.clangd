@@ -1,0 +1,9 @@
+CompileFlags:
+  CompilationDatabase: Build/release
+
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None
+
+Style:
+  AngledHeaders: ["AK/.*", "Lib.*"]

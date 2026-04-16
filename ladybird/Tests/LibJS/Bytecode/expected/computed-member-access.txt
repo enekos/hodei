@@ -1,0 +1,37 @@
+$d6bbce15 computed-member-access.js:12:1
+  Registers: 9
+  Blocks:    1
+  Constants:
+    [0] = Undefined
+    [1] = Int32(0)
+
+block0:
+  [   0] GetGlobal dst:reg6, `computed_read`
+  [  18] NewPrimitiveArray dst:reg7, elements:[1]
+  [  30] Call dst:reg5, callee:reg6, this_value:Undefined, computed_read, arguments:[reg7]
+  [  58] GetGlobal dst:reg7, `computed_read_expression`
+  [  70] NewPrimitiveArray dst:reg8, elements:[1]
+  [  88] Call dst:reg6, callee:reg7, this_value:Undefined, computed_read_expression, arguments:[reg8, Int32(0)]
+  [  b0] End value:reg6
+
+
+computed_read$a6f67e31 computed-member-access.js:5:5
+  Registers: 7
+  Blocks:    1
+  Constants:
+    [0] = Int32(0)
+
+block0:
+  [   0] Mov dst:reg5, src:arg0
+  [  10] GetByValue dst:reg6, base:reg5, property:Int32(0) (a[Int32(0)])
+  [  28] Return value:reg6
+
+
+computed_read_expression$adb2a228 computed-member-access.js:9:5
+  Registers: 7
+  Blocks:    1
+
+block0:
+  [   0] Mov dst:reg5, src:arg0
+  [  10] GetByValue dst:reg6, base:reg5, property:arg1 (a[arg1])
+  [  28] Return value:reg6

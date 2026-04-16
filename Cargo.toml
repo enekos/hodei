@@ -1,0 +1,8 @@
+[workspace]
+members = ["crates/orthogonal-core", "crates/orthogonal-app"]
+resolver = "2"
+exclude = ["crates/orthogonal-servo", "servo", "ladybird"]
+
+[workspace.dependencies]
+log = "0.4"
+env_logger = "0.11"
