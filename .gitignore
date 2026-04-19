@@ -35,3 +35,6 @@ Thumbs.db
 *.bak
 *.orig
 *.rej
+
+# Git worktrees (subagent-driven development)
+.worktrees/
