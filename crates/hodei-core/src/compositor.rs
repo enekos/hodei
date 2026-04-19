@@ -11,7 +11,7 @@ void main() {
     pos = u_rect.xy + pos * u_rect.zw;
     pos = pos * 2.0 - 1.0;
     gl_Position = vec4(pos, 0.0, 1.0);
-    v_uv = a_uv;
+    v_uv = vec2(a_uv.x, 1.0 - a_uv.y);
 }
 "#;
 

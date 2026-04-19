@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git checkout *)",
+      "Bash(cargo test *)",
+      "Bash(git commit *)",
+      "Bash(rm /Users/enekosarasola/hodei/.git/index.lock)",
+      "Bash(git -C /Users/enekosarasola/hodei add crates/hodei-core/src/config.rs crates/hodei-core/src/lib.rs crates/hodei-core/Cargo.toml Cargo.lock)",
+      "Bash(git -C /Users/enekosarasola/hodei commit -m ' *)",
+      "Bash(cargo build *)",
+      "Bash(cat)",
+      "Read(//tmp/**)",
+      "Bash(cargo check *)"
+    ]
+  }
+}

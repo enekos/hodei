@@ -1,10 +1,10 @@
-# Orthogonal × Mairu Phase 1 Implementation Plan
+# Hodei × Mairu Phase 1 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make orthogonal a first-class mairu host: per-workspace project tagging, an agent tile loading mairu's chat URL, mairu-leverage commands (`:scrape`/`:diff`/`:skill`), DevTools-lite (`:inspect`/`:console`/`:network`), all glued together by a small bidirectional HTTP bridge between orthogonal and mairu's `:8788` daemon.
+**Goal:** Make hodei a first-class mairu host: per-workspace project tagging, an agent tile loading mairu's chat URL, mairu-leverage commands (`:scrape`/`:diff`/`:skill`), DevTools-lite (`:inspect`/`:console`/`:network`), all glued together by a small bidirectional HTTP bridge between hodei and mairu's `:8788` daemon.
 
-**Architecture:** New `orthogonal-mairu` crate hosts (a) a typed reqwest client to mairu's `:8788`, (b) a tiny Axum HTTP server bound to `127.0.0.1:<ephemeral>` exposing tile-state tools the mairu agent calls back into. A single Tokio runtime on a background thread owns both. The winit/App thread communicates with it via mpsc channels and an `Arc<RwLock<TilesSnapshot>>` published every frame. Project tagging lives on `Workspace` (persisted) with optional per-tile override (in-memory). All eight new commands are added through the existing `parse_command` + `Action` + App-handler pattern.
+**Architecture:** New `hodei-mairu` crate hosts (a) a typed reqwest client to mairu's `:8788`, (b) a tiny Axum HTTP server bound to `127.0.0.1:<ephemeral>` exposing tile-state tools the mairu agent calls back into. A single Tokio runtime on a background thread owns both. The winit/App thread communicates with it via mpsc channels and an `Arc<RwLock<TilesSnapshot>>` published every frame. Project tagging lives on `Workspace` (persisted) with optional per-tile override (in-memory). All eight new commands are added through the existing `parse_command` + `Action` + App-handler pattern.
 
 **Tech Stack:** Rust 2021, Tokio (multi-thread runtime, bg thread), reqwest 0.12 (rustls), axum 0.7, tower 0.5, hyper 1, wiremock 0.6 (test), serde_json, rusqlite (existing), Slint (existing HUD), Servo's `WebView::evaluate_javascript` (existing).
 
@@ -14,41 +14,41 @@
 
 | File | Status | Responsibility |
 |---|---|---|
-| `Cargo.toml` (workspace) | Modify | Add `crates/orthogonal-mairu` to `members`. Pin shared async deps in `[workspace.dependencies]`. |
-| `crates/orthogonal-mairu/Cargo.toml` | Create | New crate manifest. |
-| `crates/orthogonal-mairu/src/lib.rs` | Create | Public exports + `Bridge` façade that owns the runtime thread. |
-| `crates/orthogonal-mairu/src/runtime.rs` | Create | Tokio runtime spawned on its own OS thread + shutdown handle. |
-| `crates/orthogonal-mairu/src/auth.rs` | Create | Read/write `~/.mairu/orthogonal-token` (mode 0600) and `~/.mairu/orthogonal.json`. |
-| `crates/orthogonal-mairu/src/client.rs` | Create | `MairuClient` — typed reqwest wrapper around mairu `:8788`. |
-| `crates/orthogonal-mairu/src/server.rs` | Create | Axum server: `/health`, `/tiles`, `/tiles/focused`, `/tiles/{id}`. Bearer-token middleware. |
-| `crates/orthogonal-mairu/src/state.rs` | Create | `TilesSnapshot`, `TileSnapshot`, `DomRequest`, `DomResponse` (shared between threads). |
-| `crates/orthogonal-mairu/src/error.rs` | Create | `BridgeError` + `Result` alias. |
+| `Cargo.toml` (workspace) | Modify | Add `crates/hodei-mairu` to `members`. Pin shared async deps in `[workspace.dependencies]`. |
+| `crates/hodei-mairu/Cargo.toml` | Create | New crate manifest. |
+| `crates/hodei-mairu/src/lib.rs` | Create | Public exports + `Bridge` façade that owns the runtime thread. |
+| `crates/hodei-mairu/src/runtime.rs` | Create | Tokio runtime spawned on its own OS thread + shutdown handle. |
+| `crates/hodei-mairu/src/auth.rs` | Create | Read/write `~/.mairu/hodei-token` (mode 0600) and `~/.mairu/hodei.json`. |
+| `crates/hodei-mairu/src/client.rs` | Create | `MairuClient` — typed reqwest wrapper around mairu `:8788`. |
+| `crates/hodei-mairu/src/server.rs` | Create | Axum server: `/health`, `/tiles`, `/tiles/focused`, `/tiles/{id}`. Bearer-token middleware. |
+| `crates/hodei-mairu/src/state.rs` | Create | `TilesSnapshot`, `TileSnapshot`, `DomRequest`, `DomResponse` (shared between threads). |
+| `crates/hodei-mairu/src/error.rs` | Create | `BridgeError` + `Result` alias. |
 | `migrations/004_workspace_project.sql` | Create | `ALTER TABLE sessions ADD COLUMN project TEXT;` |
-| `crates/orthogonal-core/src/db.rs` | Modify | Include + run migration 004 with column-existence guard. |
-| `crates/orthogonal-core/src/types.rs` | Modify | Add `Memory`, `Node`, `Skill`, `ScrapedPage`, `BlastRadius`, `InspectInfo`, `NetEntry`, `TileMeta`. |
-| `crates/orthogonal-core/src/view.rs` | Modify | Add `View.project_override: Option<String>`. |
-| `crates/orthogonal-core/src/workspace.rs` | Modify | Add `Workspace.project: Option<String>`; wire through save/restore. Add `effective_project` helper. |
-| `crates/orthogonal-core/src/session.rs` | Modify | Persist/restore the new `project` column. |
-| `crates/orthogonal-core/src/input.rs` | Modify | Parse `:agent`, `:project`, `:scrape`, `:diff`, `:skill`, `:inspect`, `:console`, `:network`. Add matching `Action` variants. |
-| `crates/orthogonal-core/src/hud.rs` | Modify | Add `set_project_text`, `set_mairu_status`, `set_console_*`, `set_diff_panel_*`, `set_inspect_info`. |
-| `crates/orthogonal-core/src/devtools.rs` | Create | `InspectorShim` (JS), `ConsoleHistory`, `NetworkBuffer` (ring buffer cap 500). |
+| `crates/hodei-core/src/db.rs` | Modify | Include + run migration 004 with column-existence guard. |
+| `crates/hodei-core/src/types.rs` | Modify | Add `Memory`, `Node`, `Skill`, `ScrapedPage`, `BlastRadius`, `InspectInfo`, `NetEntry`, `TileMeta`. |
+| `crates/hodei-core/src/view.rs` | Modify | Add `View.project_override: Option<String>`. |
+| `crates/hodei-core/src/workspace.rs` | Modify | Add `Workspace.project: Option<String>`; wire through save/restore. Add `effective_project` helper. |
+| `crates/hodei-core/src/session.rs` | Modify | Persist/restore the new `project` column. |
+| `crates/hodei-core/src/input.rs` | Modify | Parse `:agent`, `:project`, `:scrape`, `:diff`, `:skill`, `:inspect`, `:console`, `:network`. Add matching `Action` variants. |
+| `crates/hodei-core/src/hud.rs` | Modify | Add `set_project_text`, `set_mairu_status`, `set_console_*`, `set_diff_panel_*`, `set_inspect_info`. |
+| `crates/hodei-core/src/devtools.rs` | Create | `InspectorShim` (JS), `ConsoleHistory`, `NetworkBuffer` (ring buffer cap 500). |
 | `ui/hud.slint` | Modify | Add `proj-text`, `mairu-status`, `console-visible`/`console-lines`, `diff-visible`/`diff-text`, `inspect-visible`/`inspect-text` properties + Slint widgets. |
-| `crates/orthogonal-app/Cargo.toml` | Modify | Depend on `orthogonal-mairu`. |
-| `crates/orthogonal-app/src/app.rs` | Modify | Spin up `Bridge` on startup. Publish `TilesSnapshot` each frame. Service `DomRequest`s. Implement handlers for all new `Action` variants. |
-| `crates/orthogonal-core/src/lib.rs` | Modify | `pub mod devtools;` |
-| `crates/orthogonal-app/src/devtools_repo.rs` | Create | URL → local repo path resolver (config map + `repo_roots` scan). |
-| `crates/orthogonal-core/src/config.rs` | Modify | Add `[mairu]` section (`base_url`, `default_project`, `repo_roots`, `[diff.repos]` map). |
+| `crates/hodei-app/Cargo.toml` | Modify | Depend on `hodei-mairu`. |
+| `crates/hodei-app/src/app.rs` | Modify | Spin up `Bridge` on startup. Publish `TilesSnapshot` each frame. Service `DomRequest`s. Implement handlers for all new `Action` variants. |
+| `crates/hodei-core/src/lib.rs` | Modify | `pub mod devtools;` |
+| `crates/hodei-app/src/devtools_repo.rs` | Create | URL → local repo path resolver (config map + `repo_roots` scan). |
+| `crates/hodei-core/src/config.rs` | Modify | Add `[mairu]` section (`base_url`, `default_project`, `repo_roots`, `[diff.repos]` map). |
 
 ---
 
-## Task 1: Add `orthogonal-mairu` crate skeleton
+## Task 1: Add `hodei-mairu` crate skeleton
 
 **Goal:** New crate compiles, is wired into the workspace, and exposes a no-op `Bridge::start()`/`shutdown()` API the App can call. No behavior yet.
 
 **Files:**
-- Create: `crates/orthogonal-mairu/Cargo.toml`
-- Create: `crates/orthogonal-mairu/src/lib.rs`
-- Create: `crates/orthogonal-mairu/src/error.rs`
+- Create: `crates/hodei-mairu/Cargo.toml`
+- Create: `crates/hodei-mairu/src/lib.rs`
+- Create: `crates/hodei-mairu/src/error.rs`
 - Modify: `Cargo.toml` (workspace root)
 
 - [ ] **Step 1: Add the crate to the workspace**
@@ -57,9 +57,9 @@ Edit `Cargo.toml` (workspace root) — change `members` line:
 
 ```toml
 [workspace]
-members = ["crates/orthogonal-core", "crates/orthogonal-app", "crates/orthogonal-mairu"]
+members = ["crates/hodei-core", "crates/hodei-app", "crates/hodei-mairu"]
 resolver = "2"
-exclude = ["crates/orthogonal-servo", "servo", "ladybird"]
+exclude = ["crates/hodei-servo", "servo", "ladybird"]
 
 [workspace.dependencies]
 log = "0.4"
@@ -75,16 +75,16 @@ thiserror = "1"
 
 - [ ] **Step 2: Create the crate manifest**
 
-Create `crates/orthogonal-mairu/Cargo.toml`:
+Create `crates/hodei-mairu/Cargo.toml`:
 
 ```toml
 [package]
-name = "orthogonal-mairu"
+name = "hodei-mairu"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-orthogonal-core = { path = "../orthogonal-core" }
+hodei-core = { path = "../hodei-core" }
 tokio = { workspace = true }
 reqwest = { workspace = true }
 axum = { workspace = true }
@@ -105,7 +105,7 @@ tempfile = "3"
 
 - [ ] **Step 3: Create the lib root with a stub `Bridge`**
 
-Create `crates/orthogonal-mairu/src/lib.rs`:
+Create `crates/hodei-mairu/src/lib.rs`:
 
 ```rust
 pub mod auth;
@@ -142,7 +142,7 @@ impl Bridge {
 
 - [ ] **Step 4: Create the error module and stub the other modules**
 
-Create `crates/orthogonal-mairu/src/error.rs`:
+Create `crates/hodei-mairu/src/error.rs`:
 
 ```rust
 use thiserror::Error;
@@ -170,7 +170,7 @@ pub type Result<T> = std::result::Result<T, BridgeError>;
 
 Create empty stubs for the modules referenced by `lib.rs` so the crate compiles:
 
-`crates/orthogonal-mairu/src/auth.rs`, `client.rs`, `runtime.rs`, `server.rs`, `state.rs` — each containing only:
+`crates/hodei-mairu/src/auth.rs`, `client.rs`, `runtime.rs`, `server.rs`, `state.rs` — each containing only:
 
 ```rust
 // Implemented in a later task.
@@ -178,14 +178,14 @@ Create empty stubs for the modules referenced by `lib.rs` so the crate compiles:
 
 - [ ] **Step 5: Verify the crate compiles**
 
-Run: `cargo check -p orthogonal-mairu`
+Run: `cargo check -p hodei-mairu`
 Expected: warnings about unused stub modules are OK; **no errors**, exit 0.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Cargo.toml crates/orthogonal-mairu
-git commit -m "feat(mairu): add orthogonal-mairu crate skeleton
+git add Cargo.toml crates/hodei-mairu
+git commit -m "feat(mairu): add hodei-mairu crate skeleton
 
 Wires the new crate into the workspace with shared async deps.
 Bridge façade is a stub — filled out in subsequent tasks."
@@ -198,12 +198,12 @@ Bridge façade is a stub — filled out in subsequent tasks."
 **Goal:** Define the data types that flow between the App thread and the bridge thread. No I/O yet.
 
 **Files:**
-- Modify: `crates/orthogonal-mairu/src/state.rs`
+- Modify: `crates/hodei-mairu/src/state.rs`
 - Test: inline `#[cfg(test)] mod tests` in the same file
 
 - [ ] **Step 1: Write the failing test**
 
-Replace the contents of `crates/orthogonal-mairu/src/state.rs`:
+Replace the contents of `crates/hodei-mairu/src/state.rs`:
 
 ```rust
 use serde::Serialize;
@@ -258,12 +258,12 @@ mod tests {
             id: 42,
             url: "https://example.com".into(),
             title: "Ex".into(),
-            project: Some("orthogonal".into()),
+            project: Some("hodei".into()),
         };
         let v = serde_json::to_value(&t).unwrap();
         assert_eq!(v["id"], 42);
         assert_eq!(v["url"], "https://example.com");
-        assert_eq!(v["project"], "orthogonal");
+        assert_eq!(v["project"], "hodei");
     }
 
     #[test]
@@ -284,13 +284,13 @@ mod tests {
 
 - [ ] **Step 2: Run the tests, verify they pass**
 
-Run: `cargo test -p orthogonal-mairu --lib state`
+Run: `cargo test -p hodei-mairu --lib state`
 Expected: 3 passed, 0 failed.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add crates/orthogonal-mairu/src/state.rs
+git add crates/hodei-mairu/src/state.rs
 git commit -m "feat(mairu): add shared state types for the bridge
 
 TilesSnapshot is the App-published, server-readable view of tile
@@ -302,14 +302,14 @@ between the axum server and the App thread."
 
 ## Task 3: `auth` module — token file management
 
-**Goal:** Read or create `~/.mairu/orthogonal-token` (32-byte hex, mode 0600 on Unix). Write `~/.mairu/orthogonal.json` with port + token + version for mairu/dashboard discovery.
+**Goal:** Read or create `~/.mairu/hodei-token` (32-byte hex, mode 0600 on Unix). Write `~/.mairu/hodei.json` with port + token + version for mairu/dashboard discovery.
 
 **Files:**
-- Modify: `crates/orthogonal-mairu/src/auth.rs`
+- Modify: `crates/hodei-mairu/src/auth.rs`
 
 - [ ] **Step 1: Write the failing test**
 
-Replace the contents of `crates/orthogonal-mairu/src/auth.rs`:
+Replace the contents of `crates/hodei-mairu/src/auth.rs`:
 
 ```rust
 use crate::error::{BridgeError, Result};
@@ -329,11 +329,11 @@ pub fn mairu_dir() -> Result<PathBuf> {
 }
 
 pub fn token_path() -> Result<PathBuf> {
-    Ok(mairu_dir()?.join("orthogonal-token"))
+    Ok(mairu_dir()?.join("hodei-token"))
 }
 
 pub fn descriptor_path() -> Result<PathBuf> {
-    Ok(mairu_dir()?.join("orthogonal.json"))
+    Ok(mairu_dir()?.join("hodei.json"))
 }
 
 /// Read the token file; create one with a fresh random token if missing.
@@ -478,33 +478,33 @@ mod tests {
 
 - [ ] **Step 2: Run the tests, verify they pass**
 
-Run: `cargo test -p orthogonal-mairu --lib auth -- --test-threads=1`
+Run: `cargo test -p hodei-mairu --lib auth -- --test-threads=1`
 (Single-threaded because the tests mutate `$HOME`.)
 Expected: 4 passed (5 on Unix).
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add crates/orthogonal-mairu/src/auth.rs
+git add crates/hodei-mairu/src/auth.rs
 git commit -m "feat(mairu): token + descriptor file management
 
-~/.mairu/orthogonal-token holds a 32-byte hex token (mode 0600).
-~/.mairu/orthogonal.json publishes host/port/token so mairu and
-its dashboard can discover the orthogonal tool server."
+~/.mairu/hodei-token holds a 32-byte hex token (mode 0600).
+~/.mairu/hodei.json publishes host/port/token so mairu and
+its dashboard can discover the hodei tool server."
 ```
 
 ---
 
 ## Task 4: `MairuClient` — typed HTTP wrapper around `:8788`
 
-**Goal:** Async client returning typed Rust values for the mairu endpoints orthogonal needs. Tested with `wiremock`.
+**Goal:** Async client returning typed Rust values for the mairu endpoints hodei needs. Tested with `wiremock`.
 
 **Files:**
-- Modify: `crates/orthogonal-mairu/src/client.rs`
+- Modify: `crates/hodei-mairu/src/client.rs`
 
 - [ ] **Step 1: Write the failing tests + minimal types**
 
-Replace the contents of `crates/orthogonal-mairu/src/client.rs`:
+Replace the contents of `crates/hodei-mairu/src/client.rs`:
 
 ```rust
 use crate::error::{BridgeError, Result};
@@ -672,14 +672,14 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/memory/search"))
             .and(query_param("q", "auth"))
-            .and(query_param("project", "orthogonal"))
+            .and(query_param("project", "hodei"))
             .and(query_param("k", "5"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
                 {"id": "1", "content": "use jwt", "category": "decision", "importance": 7}
             ])))
             .mount(&server).await;
         let c = client_for(&server).await;
-        let mems = c.memory_search("auth", "orthogonal", 5).await.unwrap();
+        let mems = c.memory_search("auth", "hodei", 5).await.unwrap();
         assert_eq!(mems.len(), 1);
         assert_eq!(mems[0].content, "use jwt");
     }
@@ -693,7 +693,7 @@ mod tests {
             })))
             .mount(&server).await;
         let c = client_for(&server).await;
-        let page = c.scrape_web("https://x.com", "orthogonal").await.unwrap();
+        let page = c.scrape_web("https://x.com", "hodei").await.unwrap();
         assert_eq!(page.node_id, "abc");
         assert_eq!(page.reader_url, "http://localhost:8788/reader/abc");
     }
@@ -710,16 +710,16 @@ mod tests {
 
 - [ ] **Step 2: Run the tests, verify they pass**
 
-Run: `cargo test -p orthogonal-mairu --lib client`
+Run: `cargo test -p hodei-mairu --lib client`
 Expected: 4 passed.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add crates/orthogonal-mairu/src/client.rs
+git add crates/hodei-mairu/src/client.rs
 git commit -m "feat(mairu): typed reqwest client for mairu :8788
 
-Wraps the seven endpoints orthogonal needs (health, memory/search,
+Wraps the seven endpoints hodei needs (health, memory/search,
 node/search, skill/list, scrape/web, analyze/diff). All calls take
 explicit project. Tested via wiremock."
 ```
@@ -731,13 +731,13 @@ explicit project. Tested via wiremock."
 **Goal:** A real `Bridge::start()` that spawns a Tokio runtime on its own thread, binds an Axum server on `127.0.0.1:0`, returns the chosen port, and writes the descriptor file. The server has `/health`, `/tiles`, `/tiles/focused`, `/tiles/{id}` with bearer-token middleware. DOM-needing endpoints proxy via `DomRequest` channel.
 
 **Files:**
-- Modify: `crates/orthogonal-mairu/src/runtime.rs`
-- Modify: `crates/orthogonal-mairu/src/server.rs`
-- Modify: `crates/orthogonal-mairu/src/lib.rs`
+- Modify: `crates/hodei-mairu/src/runtime.rs`
+- Modify: `crates/hodei-mairu/src/server.rs`
+- Modify: `crates/hodei-mairu/src/lib.rs`
 
 - [ ] **Step 1: Implement the runtime handle**
 
-Replace the contents of `crates/orthogonal-mairu/src/runtime.rs`:
+Replace the contents of `crates/hodei-mairu/src/runtime.rs`:
 
 ```rust
 use std::sync::Arc;
@@ -802,7 +802,7 @@ fn _arc_check() -> Arc<RuntimeHandle> {
 
 - [ ] **Step 2: Implement the server**
 
-Replace the contents of `crates/orthogonal-mairu/src/server.rs`:
+Replace the contents of `crates/hodei-mairu/src/server.rs`:
 
 ```rust
 use crate::error::{BridgeError, Result};
@@ -842,7 +842,7 @@ pub async fn bind_and_serve(
 
     let handle = tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
-            log::error!("orthogonal tool server: {e}");
+            log::error!("hodei tool server: {e}");
         }
     });
     Ok((port, handle))
@@ -995,7 +995,7 @@ mod tests {
 
 - [ ] **Step 3: Implement `Bridge::start`**
 
-Replace the contents of `crates/orthogonal-mairu/src/lib.rs`:
+Replace the contents of `crates/hodei-mairu/src/lib.rs`:
 
 ```rust
 pub mod auth;
@@ -1026,7 +1026,7 @@ pub struct Bridge {
 impl Bridge {
     /// Spawn the runtime, bind the tool server, write the descriptor file.
     pub fn start(mairu_base_url: url::Url) -> Result<Self> {
-        let runtime = runtime::RuntimeHandle::spawn("orthogonal-mairu")
+        let runtime = runtime::RuntimeHandle::spawn("hodei-mairu")
             .map_err(BridgeError::from)?;
 
         let token = auth::load_or_create_token()?;
@@ -1079,12 +1079,12 @@ impl Bridge {
 
 - [ ] **Step 4: Run the tests and verify they pass**
 
-Run: `cargo test -p orthogonal-mairu`
+Run: `cargo test -p hodei-mairu`
 Expected: all (state + auth + client + server) green.
 
 - [ ] **Step 5: Add an end-to-end Bridge test**
 
-Append to `crates/orthogonal-mairu/src/lib.rs`:
+Append to `crates/hodei-mairu/src/lib.rs`:
 
 ```rust
 #[cfg(test)]
@@ -1113,13 +1113,13 @@ mod bridge_tests {
 }
 ```
 
-Run: `cargo test -p orthogonal-mairu --lib bridge_tests -- --test-threads=1`
+Run: `cargo test -p hodei-mairu --lib bridge_tests -- --test-threads=1`
 Expected: 1 passed.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add crates/orthogonal-mairu
+git add crates/hodei-mairu
 git commit -m "feat(mairu): live Bridge with Tokio runtime + Axum tool server
 
 Bridge::start spawns a dedicated runtime thread, binds 127.0.0.1:0,
@@ -1135,7 +1135,7 @@ DOM-needing endpoints proxy through an mpsc channel the App drains."
 
 **Files:**
 - Create: `migrations/004_workspace_project.sql`
-- Modify: `crates/orthogonal-core/src/db.rs`
+- Modify: `crates/hodei-core/src/db.rs`
 
 - [ ] **Step 1: Write the migration**
 
@@ -1147,7 +1147,7 @@ ALTER TABLE sessions ADD COLUMN project TEXT;
 
 - [ ] **Step 2: Wire it into `db.rs` with a column-existence guard**
 
-Edit `crates/orthogonal-core/src/db.rs`, replace the migration constants and `run_migrations`:
+Edit `crates/hodei-core/src/db.rs`, replace the migration constants and `run_migrations`:
 
 ```rust
 const MIGRATION_001: &str = include_str!("../../../migrations/001_init.sql");
@@ -1170,7 +1170,7 @@ fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
 
 - [ ] **Step 3: Add a test asserting the column exists**
 
-Append to the `tests` module in `crates/orthogonal-core/src/db.rs`:
+Append to the `tests` module in `crates/hodei-core/src/db.rs`:
 
 ```rust
     #[test]
@@ -1189,13 +1189,13 @@ Append to the `tests` module in `crates/orthogonal-core/src/db.rs`:
 
 - [ ] **Step 4: Run tests**
 
-Run: `cargo test -p orthogonal-core --lib db`
+Run: `cargo test -p hodei-core --lib db`
 Expected: all green, new test passes.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add migrations/004_workspace_project.sql crates/orthogonal-core/src/db.rs
+git add migrations/004_workspace_project.sql crates/hodei-core/src/db.rs
 git commit -m "feat(db): migration 004 adds nullable project column to sessions"
 ```
 
@@ -1206,12 +1206,12 @@ git commit -m "feat(db): migration 004 adds nullable project column to sessions"
 **Goal:** WorkspaceManager carries an optional project per workspace, persisted in the new column.
 
 **Files:**
-- Modify: `crates/orthogonal-core/src/workspace.rs`
-- Modify: `crates/orthogonal-core/src/session.rs`
+- Modify: `crates/hodei-core/src/workspace.rs`
+- Modify: `crates/hodei-core/src/session.rs`
 
 - [ ] **Step 1: Extend `SessionManager::save` and `restore` with project**
 
-Edit `crates/orthogonal-core/src/session.rs`. Change `save` to accept an extra `project: Option<&str>` parameter:
+Edit `crates/hodei-core/src/session.rs`. Change `save` to accept an extra `project: Option<&str>` parameter:
 
 ```rust
     pub fn save(
@@ -1320,15 +1320,15 @@ Append to the `tests` module of `session.rs`:
         let sm = make_session_manager();
         let nodes = sample_nodes();
         let tiles = sample_tiles();
-        sm.save("work", &nodes, &tiles, Some(ViewId(1)), Some("orthogonal")).unwrap();
+        sm.save("work", &nodes, &tiles, Some(ViewId(1)), Some("hodei")).unwrap();
         let (_, _, _, proj) = sm.restore("work").unwrap().unwrap();
-        assert_eq!(proj.as_deref(), Some("orthogonal"));
+        assert_eq!(proj.as_deref(), Some("hodei"));
     }
 ```
 
 - [ ] **Step 3: Update WorkspaceManager**
 
-Edit `crates/orthogonal-core/src/workspace.rs`. Add `project: Option<String>` to `WorkspaceState`, plumb through `save_active` / `switch_to`:
+Edit `crates/hodei-core/src/workspace.rs`. Add `project: Option<String>` to `WorkspaceState`, plumb through `save_active` / `switch_to`:
 
 ```rust
 pub struct WorkspaceState {
@@ -1417,20 +1417,20 @@ Update existing `workspace.rs` tests to thread `None` for project where required
         let mut wm = make_workspace_manager();
         wm.set_active("work");
         wm.save_active(&[], &[], None, Some("mairu")).unwrap();
-        wm.set_active_project(Some("orthogonal".into()));
-        assert_eq!(wm.active_project(), Some("orthogonal"));
+        wm.set_active_project(Some("hodei".into()));
+        assert_eq!(wm.active_project(), Some("hodei"));
     }
 ```
 
 - [ ] **Step 4: Run tests**
 
-Run: `cargo test -p orthogonal-core`
+Run: `cargo test -p hodei-core`
 Expected: all green. Fix any callers that broke (usage sites in `app.rs` are updated in Task 11).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/orthogonal-core/src/workspace.rs crates/orthogonal-core/src/session.rs
+git add crates/hodei-core/src/workspace.rs crates/hodei-core/src/session.rs
 git commit -m "feat(workspace): persist optional project per workspace"
 ```
 
@@ -1441,11 +1441,11 @@ git commit -m "feat(workspace): persist optional project per workspace"
 **Goal:** Per-tile project override, in-memory only. Resolution helper that prefers override → workspace → none.
 
 **Files:**
-- Modify: `crates/orthogonal-core/src/view.rs`
+- Modify: `crates/hodei-core/src/view.rs`
 
 - [ ] **Step 1: Write the failing tests**
 
-Edit `crates/orthogonal-core/src/view.rs`. Change the `View` struct and add `effective_project`:
+Edit `crates/hodei-core/src/view.rs`. Change the `View` struct and add `effective_project`:
 
 ```rust
 pub struct View {
@@ -1501,13 +1501,13 @@ Append to the `tests` module:
 
 - [ ] **Step 2: Run tests**
 
-Run: `cargo test -p orthogonal-core --lib view`
+Run: `cargo test -p hodei-core --lib view`
 Expected: all green.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add crates/orthogonal-core/src/view.rs
+git add crates/hodei-core/src/view.rs
 git commit -m "feat(view): add per-tile project_override + resolution helper"
 ```
 
@@ -1519,7 +1519,7 @@ git commit -m "feat(view): add per-tile project_override + resolution helper"
 
 **Files:**
 - Modify: `ui/hud.slint`
-- Modify: `crates/orthogonal-core/src/hud.rs`
+- Modify: `crates/hodei-core/src/hud.rs`
 
 - [ ] **Step 1: Add new properties to `hud.slint`**
 
@@ -1629,7 +1629,7 @@ Add a diff panel and an inspect line near the bottom (above the status bar):
 
 - [ ] **Step 2: Add Rust setters in `hud.rs`**
 
-In `crates/orthogonal-core/src/hud.rs`, append to the `impl Hud { ... }` block (just before its closing brace):
+In `crates/hodei-core/src/hud.rs`, append to the `impl Hud { ... }` block (just before its closing brace):
 
 ```rust
     pub fn set_project_text(&self, text: &str) {
@@ -1666,13 +1666,13 @@ In `crates/orthogonal-core/src/hud.rs`, append to the `impl Hud { ... }` block (
 
 - [ ] **Step 3: Run a build to verify Slint codegen sees the new properties**
 
-Run: `cargo build -p orthogonal-core`
+Run: `cargo build -p hodei-core`
 Expected: clean build, no errors.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add ui/hud.slint crates/orthogonal-core/src/hud.rs
+git add ui/hud.slint crates/hodei-core/src/hud.rs
 git commit -m "feat(hud): add proj/mairu/console/diff/inspect surfaces
 
 Properties + Slint widgets and Rust setters. No behavior yet —
@@ -1686,11 +1686,11 @@ the App wires these in subsequent tasks."
 **Goal:** Input router parses `:agent`, `:project`, `:scrape`, `:diff`, `:skill`, `:inspect`, `:console`, `:network`. Each yields a typed `Action` variant. No App-side handling yet.
 
 **Files:**
-- Modify: `crates/orthogonal-core/src/input.rs`
+- Modify: `crates/hodei-core/src/input.rs`
 
 - [ ] **Step 1: Write failing tests**
 
-Append to the `tests` module of `crates/orthogonal-core/src/input.rs`:
+Append to the `tests` module of `crates/hodei-core/src/input.rs`:
 
 ```rust
     fn type_command(router: &mut InputRouter, cmd: &str) -> Vec<Action> {
@@ -1772,7 +1772,7 @@ Append to the `tests` module of `crates/orthogonal-core/src/input.rs`:
 
 - [ ] **Step 2: Add the `Action` variants**
 
-Edit the `Action` enum in `crates/orthogonal-core/src/input.rs`, append:
+Edit the `Action` enum in `crates/hodei-core/src/input.rs`, append:
 
 ```rust
     OpenAgentTile,
@@ -1819,13 +1819,13 @@ Extend the `match parts.first().copied()` in `parse_command` (in the same file),
 
 - [ ] **Step 4: Run the new tests**
 
-Run: `cargo test -p orthogonal-core --lib input`
+Run: `cargo test -p hodei-core --lib input`
 Expected: all green.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/orthogonal-core/src/input.rs
+git add crates/hodei-core/src/input.rs
 git commit -m "feat(input): parse :agent/:project/:scrape/:diff/:skill/:inspect/:console/:network"
 ```
 
@@ -1836,16 +1836,16 @@ git commit -m "feat(input): parse :agent/:project/:scrape/:diff/:skill/:inspect/
 **Goal:** App owns a `Bridge`, publishes `TilesSnapshot` whenever tile state changes, drains `DomRequest`s and replies via `evaluate_js`. Project state from `Workspace` is included in snapshots. No new commands handled yet — those land in subsequent tasks.
 
 **Files:**
-- Modify: `crates/orthogonal-app/Cargo.toml`
-- Modify: `crates/orthogonal-app/src/app.rs`
-- Modify: `crates/orthogonal-core/src/config.rs`
+- Modify: `crates/hodei-app/Cargo.toml`
+- Modify: `crates/hodei-app/src/app.rs`
+- Modify: `crates/hodei-core/src/config.rs`
 
 - [ ] **Step 1: Add the dep**
 
-Edit `crates/orthogonal-app/Cargo.toml`, add:
+Edit `crates/hodei-app/Cargo.toml`, add:
 
 ```toml
-orthogonal-mairu = { path = "../orthogonal-mairu" }
+hodei-mairu = { path = "../hodei-mairu" }
 url = "2"
 ```
 
@@ -1853,7 +1853,7 @@ url = "2"
 
 - [ ] **Step 2: Add a `[mairu]` section to config**
 
-Edit `crates/orthogonal-core/src/config.rs`. Add:
+Edit `crates/hodei-core/src/config.rs`. Add:
 
 ```rust
 #[derive(Debug, Clone, Deserialize)]
@@ -1888,7 +1888,7 @@ Add a test:
         let toml_str = r#"
 [mairu]
 base_url = "http://localhost:9999"
-default_project = "orthogonal"
+default_project = "hodei"
 repo_roots = ["~/code", "~/work"]
 
 [mairu.diff_repos]
@@ -1896,21 +1896,21 @@ repo_roots = ["~/code", "~/work"]
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.mairu.base_url, "http://localhost:9999");
-        assert_eq!(config.mairu.default_project.as_deref(), Some("orthogonal"));
+        assert_eq!(config.mairu.default_project.as_deref(), Some("hodei"));
         assert_eq!(config.mairu.repo_roots.len(), 2);
         assert_eq!(config.mairu.diff_repos.get("github.com/foo/bar").map(|s| s.as_str()), Some("/abs/path/bar"));
     }
 ```
 
-Run: `cargo test -p orthogonal-core --lib config`
+Run: `cargo test -p hodei-core --lib config`
 Expected: all green.
 
 - [ ] **Step 3: Start the bridge in `App::new`**
 
-Edit `crates/orthogonal-app/src/app.rs`. Add to imports:
+Edit `crates/hodei-app/src/app.rs`. Add to imports:
 
 ```rust
-use orthogonal_mairu::{Bridge, DomRequest, DomResponse, TileSnapshot, TilesSnapshot};
+use hodei_mairu::{Bridge, DomRequest, DomResponse, TileSnapshot, TilesSnapshot};
 ```
 
 Add fields to `App`:
@@ -1951,7 +1951,7 @@ In `app.rs`, add an `App` method (place near other helpers):
         let focused = self.layout.focused();
         let tiles = self.layout.resolve().into_iter().filter_map(|(id, _rect)| {
             let v = self.views.get(id)?;
-            let project = orthogonal_core::view::effective_project(Some(v), workspace_project.as_deref()).map(String::from);
+            let project = hodei_core::view::effective_project(Some(v), workspace_project.as_deref()).map(String::from);
             Some(TileSnapshot {
                 id: id.0,
                 url: v.url.clone(),
@@ -1970,7 +1970,7 @@ In `app.rs`, add an `App` method (place near other helpers):
     }
 ```
 
-> Note: `BspLayout::resolve()` already returns `Vec<(ViewId, Rect)>` for every leaf and `BspLayout::focused() -> Option<ViewId>` exists. Other helpers used in later tasks: `set_focused(view_id)` (NOT `set_focus`) and `split(target_view_id, SplitDirection, new_view_id)` (NOT `split_focused`). Verified via `grep "pub fn"` on `crates/orthogonal-core/src/layout.rs`.
+> Note: `BspLayout::resolve()` already returns `Vec<(ViewId, Rect)>` for every leaf and `BspLayout::focused() -> Option<ViewId>` exists. Other helpers used in later tasks: `set_focused(view_id)` (NOT `set_focus`) and `split(target_view_id, SplitDirection, new_view_id)` (NOT `split_focused`). Verified via `grep "pub fn"` on `crates/hodei-core/src/layout.rs`.
 
 Call `self.publish_tiles_snapshot();` at the end of any place tile state changes — at minimum:
 - after creating/destroying a view
@@ -2037,12 +2037,12 @@ Call `self.service_dom_requests();` at the top of the main winit redraw / Servo-
 Run: `cargo build --workspace`
 Expected: clean build.
 
-Run: `cargo run -p orthogonal-app` and verify it boots without panic. Stop it with `Esc`/quit. Confirm `~/.mairu/orthogonal.json` was written and contains a non-zero port.
+Run: `cargo run -p hodei-app` and verify it boots without panic. Stop it with `Esc`/quit. Confirm `~/.mairu/hodei.json` was written and contains a non-zero port.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add crates/orthogonal-app crates/orthogonal-core/src/config.rs
+git add crates/hodei-app crates/hodei-core/src/config.rs
 git commit -m "feat(app): start Bridge on launch, publish tile snapshots, service DOM tool calls"
 ```
 
@@ -2053,7 +2053,7 @@ git commit -m "feat(app): start Bridge on launch, publish tile snapshots, servic
 **Goal:** Show mairu daemon status in HUD. Implement the `:project` command end-to-end (workspace + per-tile override). The HUD `proj:` indicator updates from the snapshot.
 
 **Files:**
-- Modify: `crates/orthogonal-app/src/app.rs`
+- Modify: `crates/hodei-app/src/app.rs`
 
 - [ ] **Step 1: Periodic health check**
 
@@ -2127,12 +2127,12 @@ Add to the App's action-dispatch `match action { ... }`:
 Run: `cargo build --workspace`
 Expected: clean build.
 
-Run: `cargo run -p orthogonal-app`. With mairu daemon stopped, verify `[mairu:down]` appears in HUD. Start mairu: `mairu context-server -p 8788 &` (in another terminal). Within 15s the indicator flips to `[mairu]`. Try `:project foo` → see `[proj:foo]`. Try `:project --workspace bar` → still see `[proj:foo]` (override wins). `:project --clear` → see `[proj:bar]`.
+Run: `cargo run -p hodei-app`. With mairu daemon stopped, verify `[mairu:down]` appears in HUD. Start mairu: `mairu context-server -p 8788 &` (in another terminal). Within 15s the indicator flips to `[mairu]`. Try `:project foo` → see `[proj:foo]`. Try `:project --workspace bar` → still see `[proj:foo]` (override wins). `:project --clear` → see `[proj:bar]`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/orthogonal-app/src/app.rs
+git add crates/hodei-app/src/app.rs
 git commit -m "feat(app): :project command + HUD indicators for project + mairu daemon"
 ```
 
@@ -2143,7 +2143,7 @@ git commit -m "feat(app): :project command + HUD indicators for project + mairu 
 **Goal:** `:agent` opens (or focuses) a tile pointing at `<mairu_base_url>/agent?project=<p>&orth=<endpoint>&token=<t>`. If a tile in the current workspace is already at an `/agent` URL, focus it instead of opening another.
 
 **Files:**
-- Modify: `crates/orthogonal-app/src/app.rs`
+- Modify: `crates/hodei-app/src/app.rs`
 
 - [ ] **Step 1: Build the URL helper**
 
@@ -2223,12 +2223,12 @@ Add to the action-dispatch match:
 
 - [ ] **Step 4: Smoke-test**
 
-Run: `cargo run -p orthogonal-app`. Type `:agent`. With mairu running, a new tile should open at `http://127.0.0.1:8788/agent?...`. (The `/agent` route is mairu-side work and may 404 today — that's OK; orthogonal's behavior is the request itself.) Verify the URL HUD shows the agent URL with project/orth/token query params.
+Run: `cargo run -p hodei-app`. Type `:agent`. With mairu running, a new tile should open at `http://127.0.0.1:8788/agent?...`. (The `/agent` route is mairu-side work and may 404 today — that's OK; hodei's behavior is the request itself.) Verify the URL HUD shows the agent URL with project/orth/token query params.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/orthogonal-app/src/app.rs
+git add crates/hodei-app/src/app.rs
 git commit -m "feat(app): :agent opens or focuses mairu chat tile with handshake"
 ```
 
@@ -2239,7 +2239,7 @@ git commit -m "feat(app): :agent opens or focuses mairu chat tile with handshake
 **Goal:** `:scrape https://x.com` calls `mairu.scrape_web(url, project)`, then opens the returned `reader_url` in a new tile. If project is unset, HUD prompts.
 
 **Files:**
-- Modify: `crates/orthogonal-app/src/app.rs`
+- Modify: `crates/hodei-app/src/app.rs`
 
 - [ ] **Step 1: Project resolution helper**
 
@@ -2250,7 +2250,7 @@ Add to `App`:
         let workspace_project = self.workspace.as_ref().and_then(|w| w.active_project()).map(String::from);
         let focused = self.layout.focused();
         let view = focused.and_then(|id| self.views.get(id));
-        orthogonal_core::view::effective_project(view, workspace_project.as_deref())
+        hodei_core::view::effective_project(view, workspace_project.as_deref())
             .map(String::from)
             .or_else(|| self.config.mairu.default_project.clone())
     }
@@ -2294,7 +2294,7 @@ Add to `App`:
             }
 ```
 
-> Note: `set_status` is referenced throughout subsequent tasks. The HUD already has a `status_text` Slint property and `Hud::set_status_text(&str)` Rust setter (verified via grep on `crates/orthogonal-app/src/app.rs:786`). Define this helper on `App` once, here:
+> Note: `set_status` is referenced throughout subsequent tasks. The HUD already has a `status_text` Slint property and `Hud::set_status_text(&str)` Rust setter (verified via grep on `crates/hodei-app/src/app.rs:786`). Define this helper on `App` once, here:
 >
 > ```rust
 > fn set_status(&self, msg: &str) {
@@ -2304,12 +2304,12 @@ Add to `App`:
 
 - [ ] **Step 3: Smoke-test**
 
-Run mairu, then `cargo run -p orthogonal-app`. Set a project (`:project orthogonal`), then `:scrape https://news.ycombinator.com`. A new tile should open at the reader URL.
+Run mairu, then `cargo run -p hodei-app`. Set a project (`:project hodei`), then `:scrape https://news.ycombinator.com`. A new tile should open at the reader URL.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add crates/orthogonal-app/src/app.rs
+git add crates/hodei-app/src/app.rs
 git commit -m "feat(app): :scrape <url> opens scraped reader tile via mairu"
 ```
 
@@ -2320,12 +2320,12 @@ git commit -m "feat(app): :scrape <url> opens scraped reader tile via mairu"
 **Goal:** `:diff` resolves the focused tile's URL → local repo path, calls `mairu.analyze_diff`, shows summary in the HUD diff panel.
 
 **Files:**
-- Create: `crates/orthogonal-app/src/devtools_repo.rs`
-- Modify: `crates/orthogonal-app/src/app.rs`
+- Create: `crates/hodei-app/src/devtools_repo.rs`
+- Modify: `crates/hodei-app/src/app.rs`
 
 - [ ] **Step 1: Repo resolver with tests**
 
-Create `crates/orthogonal-app/src/devtools_repo.rs`:
+Create `crates/hodei-app/src/devtools_repo.rs`:
 
 ```rust
 use std::collections::HashMap;
@@ -2406,11 +2406,11 @@ mod tests {
 }
 ```
 
-Wire it as a module: edit `crates/orthogonal-app/src/main.rs` (or wherever modules are declared in the app crate — read the file to confirm) and add `mod devtools_repo;`. If `app.rs` declares its own modules, add it there.
+Wire it as a module: edit `crates/hodei-app/src/main.rs` (or wherever modules are declared in the app crate — read the file to confirm) and add `mod devtools_repo;`. If `app.rs` declares its own modules, add it there.
 
 - [ ] **Step 2: Run repo-resolver tests**
 
-Run: `cargo test -p orthogonal-app --lib devtools_repo`
+Run: `cargo test -p hodei-app --lib devtools_repo`
 Expected: 3 passed.
 
 - [ ] **Step 3: Handle `Action::DiffBlastRadius`**
@@ -2454,12 +2454,12 @@ Add an `Esc` handler to dismiss the diff panel — extend the `Mode::Normal` Esc
 
 - [ ] **Step 4: Smoke-test**
 
-Make sure orthogonal is in a workspace whose focused tile is at e.g. `https://github.com/anthropics/orthogonal/...` and that local path is in config. `:diff` should populate the HUD diff panel. `Esc` dismisses.
+Make sure hodei is in a workspace whose focused tile is at e.g. `https://github.com/anthropics/hodei/...` and that local path is in config. `:diff` should populate the HUD diff panel. `Esc` dismisses.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/orthogonal-app/src/devtools_repo.rs crates/orthogonal-app/src/app.rs
+git add crates/hodei-app/src/devtools_repo.rs crates/hodei-app/src/app.rs
 git commit -m "feat(app): :diff resolves repo + shows mairu blast radius in HUD"
 ```
 
@@ -2470,7 +2470,7 @@ git commit -m "feat(app): :diff resolves repo + shows mairu blast radius in HUD"
 **Goal:** `:skill` calls `mairu.skill_list`, populates the existing suggestion-overlay UI with skill names + descriptions. Selecting one prints the chosen skill name to status (Phase 1 stops here — actually invoking the skill is mairu-agent-side work).
 
 **Files:**
-- Modify: `crates/orthogonal-app/src/app.rs`
+- Modify: `crates/hodei-app/src/app.rs`
 
 - [ ] **Step 1: Reuse the suggestions list**
 
@@ -2478,7 +2478,7 @@ Add a tiny `SkillsOverlay` state to `App`:
 
 ```rust
     skill_overlay_active: bool,
-    skill_overlay_items: Vec<orthogonal_mairu::client::Skill>,
+    skill_overlay_items: Vec<hodei_mairu::client::Skill>,
     skill_overlay_index: usize,
 ```
 
@@ -2509,8 +2509,8 @@ Add the helper:
 ```rust
     fn publish_skill_overlay_to_hud(&self) {
         let Some(hud) = self.hud.as_ref() else { return };
-        let items: Vec<orthogonal_core::hud::SuggestionItem> = self.skill_overlay_items.iter().enumerate().map(|(i, s)| {
-            orthogonal_core::hud::SuggestionItem {
+        let items: Vec<hodei_core::hud::SuggestionItem> = self.skill_overlay_items.iter().enumerate().map(|(i, s)| {
+            hodei_core::hud::SuggestionItem {
                 title: s.name.clone(),
                 url: s.description.clone(),
                 selected: i == self.skill_overlay_index,
@@ -2556,7 +2556,7 @@ Call this at the top of the keyboard event handler (before passing to InputRoute
 Run: `cargo build --workspace` first to confirm no errors.
 
 ```bash
-git add crates/orthogonal-app/src/app.rs
+git add crates/hodei-app/src/app.rs
 git commit -m "feat(app): :skill opens mairu skill palette as suggestion overlay"
 ```
 
@@ -2567,26 +2567,26 @@ git commit -m "feat(app): :skill opens mairu skill palette as suggestion overlay
 **Goal:** `:inspect` enters a mode where mouse-over highlights elements, click captures `tag/id/classes/attrs/computed-styles` to the HUD inspect line.
 
 **Files:**
-- Create: `crates/orthogonal-core/src/devtools.rs`
-- Modify: `crates/orthogonal-core/src/lib.rs`
-- Modify: `crates/orthogonal-app/src/app.rs`
+- Create: `crates/hodei-core/src/devtools.rs`
+- Modify: `crates/hodei-core/src/lib.rs`
+- Modify: `crates/hodei-app/src/app.rs`
 
 - [ ] **Step 1: JS shim + types**
 
-Create `crates/orthogonal-core/src/devtools.rs`:
+Create `crates/hodei-core/src/devtools.rs`:
 
 ```rust
 use serde::{Deserialize, Serialize};
 
 pub const INSPECTOR_INSTALL_SCRIPT: &str = r#"(function() {
-    if (window.__orthogonal_inspector__) return JSON.stringify({ ok: true });
+    if (window.__hodei_inspector__) return JSON.stringify({ ok: true });
     const state = { hovered: null, outline: null };
     function clearOutline() { if (state.outline) { state.outline.remove(); state.outline = null; } }
     function drawOutline(el) {
         clearOutline();
         const r = el.getBoundingClientRect();
         const o = document.createElement('div');
-        o.id = '__orthogonal_inspector_outline__';
+        o.id = '__hodei_inspector_outline__';
         o.style.cssText = `position:fixed;pointer-events:none;z-index:2147483647;
             left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;
             outline:2px solid #ffcc00;background:rgba(255,204,0,0.08);`;
@@ -2614,29 +2614,29 @@ pub const INSPECTOR_INSTALL_SCRIPT: &str = r#"(function() {
     function onClick(e) {
         e.preventDefault(); e.stopPropagation();
         const data = describe(e.target);
-        window.__orthogonal_last_inspect = data;
+        window.__hodei_last_inspect = data;
         return false;
     }
     document.addEventListener('mousemove', onMove, true);
     document.addEventListener('click', onClick, true);
-    window.__orthogonal_inspector__ = { uninstall: () => {
+    window.__hodei_inspector__ = { uninstall: () => {
         document.removeEventListener('mousemove', onMove, true);
         document.removeEventListener('click', onClick, true);
         clearOutline();
-        delete window.__orthogonal_inspector__;
+        delete window.__hodei_inspector__;
     }};
     return JSON.stringify({ ok: true });
 })()"#;
 
 pub const INSPECTOR_POLL_SCRIPT: &str = r#"(function() {
-    const d = window.__orthogonal_last_inspect;
+    const d = window.__hodei_last_inspect;
     if (!d) return JSON.stringify({ ready: false });
-    window.__orthogonal_last_inspect = null;
+    window.__hodei_last_inspect = null;
     return JSON.stringify({ ready: true, data: d });
 })()"#;
 
 pub const INSPECTOR_UNINSTALL_SCRIPT: &str = r#"(function() {
-    if (window.__orthogonal_inspector__) window.__orthogonal_inspector__.uninstall();
+    if (window.__hodei_inspector__) window.__hodei_inspector__.uninstall();
     return JSON.stringify({ ok: true });
 })()"#;
 
@@ -2689,7 +2689,7 @@ mod tests {
 }
 ```
 
-Edit `crates/orthogonal-core/src/lib.rs` to add `pub mod devtools;`.
+Edit `crates/hodei-core/src/lib.rs` to add `pub mod devtools;`.
 
 - [ ] **Step 2: Wire `Action::EnterInspect` and a periodic poll**
 
@@ -2708,14 +2708,14 @@ Handler:
             Action::EnterInspect => {
                 let Some(focused) = self.layout.focused() else { return };
                 let Some(engine) = self.engine.as_ref() else { return };
-                engine.evaluate_js(focused, orthogonal_core::devtools::INSPECTOR_INSTALL_SCRIPT, Box::new(|_| {}));
+                engine.evaluate_js(focused, hodei_core::devtools::INSPECTOR_INSTALL_SCRIPT, Box::new(|_| {}));
                 self.inspect_active = true;
                 if let Some(hud) = self.hud.as_ref() { hud.set_inspect_info(true, "inspect: hover an element, click to capture, Esc to exit"); }
             }
             Action::ExitToNormal if self.inspect_active => {
                 let Some(focused) = self.layout.focused() else { self.inspect_active = false; return };
                 let Some(engine) = self.engine.as_ref() else { self.inspect_active = false; return };
-                engine.evaluate_js(focused, orthogonal_core::devtools::INSPECTOR_UNINSTALL_SCRIPT, Box::new(|_| {}));
+                engine.evaluate_js(focused, hodei_core::devtools::INSPECTOR_UNINSTALL_SCRIPT, Box::new(|_| {}));
                 self.inspect_active = false;
                 if let Some(hud) = self.hud.as_ref() { hud.set_inspect_info(false, ""); }
             }
@@ -2734,7 +2734,7 @@ Periodic poll (call from `UserEvent::ServoTick`):
         let Some(engine) = self.engine.as_ref() else { return };
         // Use a channel to surface the result from the JS callback to the App thread.
         let (tx, rx) = std::sync::mpsc::channel();
-        engine.evaluate_js(focused, orthogonal_core::devtools::INSPECTOR_POLL_SCRIPT, Box::new(move |r| {
+        engine.evaluate_js(focused, hodei_core::devtools::INSPECTOR_POLL_SCRIPT, Box::new(move |r| {
             let _ = tx.send(r);
         }));
         // Drain on the next frame — store rx for one-shot pickup.
@@ -2742,7 +2742,7 @@ Periodic poll (call from `UserEvent::ServoTick`):
             let trimmed = s.trim_matches('"');
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
                 if v["ready"].as_bool().unwrap_or(false) {
-                    if let Ok(info) = serde_json::from_value::<orthogonal_core::devtools::InspectInfo>(v["data"].clone()) {
+                    if let Ok(info) = serde_json::from_value::<hodei_core::devtools::InspectInfo>(v["data"].clone()) {
                         if let Some(hud) = self.hud.as_ref() {
                             hud.set_inspect_info(true, &info.one_liner());
                         }
@@ -2757,12 +2757,12 @@ Call `self.poll_inspect();` at the top of the ServoTick handler.
 
 - [ ] **Step 3: Smoke-test**
 
-`cargo run -p orthogonal-app`. Open a content-rich page. `:inspect` → hover should outline elements; click captures one; HUD shows `<tag #id .class> text [color: ... bg: ... font: ...]`. `Esc` exits and removes the outline.
+`cargo run -p hodei-app`. Open a content-rich page. `:inspect` → hover should outline elements; click captures one; HUD shows `<tag #id .class> text [color: ... bg: ... font: ...]`. `Esc` exits and removes the outline.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add crates/orthogonal-core/src/devtools.rs crates/orthogonal-core/src/lib.rs crates/orthogonal-app/src/app.rs
+git add crates/hodei-core/src/devtools.rs crates/hodei-core/src/lib.rs crates/hodei-app/src/app.rs
 git commit -m "feat(devtools): :inspect with hover-outline + element capture HUD line"
 ```
 
@@ -2773,13 +2773,13 @@ git commit -m "feat(devtools): :inspect with hover-outline + element capture HUD
 **Goal:** `:console` toggles a console panel in the HUD. While visible, typed lines are evaluated against the focused tile's webview; results append to a scrollback buffer (cap 200 lines).
 
 **Files:**
-- Modify: `crates/orthogonal-core/src/devtools.rs`
-- Modify: `crates/orthogonal-core/src/input.rs` (new sub-mode)
-- Modify: `crates/orthogonal-app/src/app.rs`
+- Modify: `crates/hodei-core/src/devtools.rs`
+- Modify: `crates/hodei-core/src/input.rs` (new sub-mode)
+- Modify: `crates/hodei-app/src/app.rs`
 
 - [ ] **Step 1: Add `ConsoleHistory` struct + tests**
 
-Append to `crates/orthogonal-core/src/devtools.rs`:
+Append to `crates/hodei-core/src/devtools.rs`:
 
 ```rust
 pub struct ConsoleHistory {
@@ -2808,12 +2808,12 @@ mod console_tests {
 }
 ```
 
-Run: `cargo test -p orthogonal-core --lib devtools`
+Run: `cargo test -p hodei-core --lib devtools`
 Expected: 2 passed.
 
 - [ ] **Step 2: Add a console sub-mode**
 
-In `crates/orthogonal-core/src/input.rs`, add a new `Mode` variant:
+In `crates/hodei-core/src/input.rs`, add a new `Mode` variant:
 
 ```rust
     Console { input: String },
@@ -2891,7 +2891,7 @@ Add input tests:
     }
 ```
 
-Run: `cargo test -p orthogonal-core --lib input`
+Run: `cargo test -p hodei-core --lib input`
 Expected: all green.
 
 - [ ] **Step 3: App-side wiring**
@@ -2899,11 +2899,11 @@ Expected: all green.
 Add to `App`:
 
 ```rust
-    console_history: orthogonal_core::devtools::ConsoleHistory,
+    console_history: hodei_core::devtools::ConsoleHistory,
     console_visible: bool,
 ```
 
-In `App::new`: `console_history: orthogonal_core::devtools::ConsoleHistory::new(200), console_visible: false,`.
+In `App::new`: `console_history: hodei_core::devtools::ConsoleHistory::new(200), console_visible: false,`.
 
 Handlers:
 
@@ -2945,12 +2945,12 @@ Handlers:
 
 - [ ] **Step 4: Smoke-test**
 
-`cargo run -p orthogonal-app`, open any page, `:console`, type `2+2`, Enter → `4` appears (or "Number(4)" / similar Servo serialization). `Esc` closes.
+`cargo run -p hodei-app`, open any page, `:console`, type `2+2`, Enter → `4` appears (or "Number(4)" / similar Servo serialization). `Esc` closes.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/orthogonal-core/src/devtools.rs crates/orthogonal-core/src/input.rs crates/orthogonal-app/src/app.rs
+git add crates/hodei-core/src/devtools.rs crates/hodei-core/src/input.rs crates/hodei-app/src/app.rs
 git commit -m "feat(devtools): :console JS eval panel with scrollback ring buffer"
 ```
 
@@ -2961,13 +2961,13 @@ git commit -m "feat(devtools): :console JS eval panel with scrollback ring buffe
 **Goal:** A per-tile ring buffer of recent network requests. `:network` opens a tile rendering the current focused tile's buffer as JSON-pretty-printed text. If Servo's network observer isn't available, fall back to "DevTools mode unavailable on this Servo build".
 
 **Files:**
-- Modify: `crates/orthogonal-core/src/devtools.rs`
-- Modify: `crates/orthogonal-app/src/app.rs`
-- Possibly: `crates/orthogonal-servo/src/lib.rs` (depends on Servo API surface)
+- Modify: `crates/hodei-core/src/devtools.rs`
+- Modify: `crates/hodei-app/src/app.rs`
+- Possibly: `crates/hodei-servo/src/lib.rs` (depends on Servo API surface)
 
 - [ ] **Step 1: Ring buffer + types + tests**
 
-Append to `crates/orthogonal-core/src/devtools.rs`:
+Append to `crates/hodei-core/src/devtools.rs`:
 
 ```rust
 #[derive(Debug, Clone, serde::Serialize)]
@@ -3027,12 +3027,12 @@ mod net_tests {
 }
 ```
 
-Run: `cargo test -p orthogonal-core --lib devtools`
+Run: `cargo test -p hodei-core --lib devtools`
 Expected: 3 passed.
 
 - [ ] **Step 2: Investigate Servo's network observer**
 
-Read `crates/orthogonal-servo/src/lib.rs` and the Servo API docs to determine the exact network-listener API in this Servo version. Possible APIs:
+Read `crates/hodei-servo/src/lib.rs` and the Servo API docs to determine the exact network-listener API in this Servo version. Possible APIs:
 
 - `WebView::set_devtools_attached(true)` + a delegate hook
 - A `NetworkListener` trait in `servo::script_traits` or `servo::net`
@@ -3046,9 +3046,9 @@ If the API does not exist: skip Step 3 implementation and instead make Step 4 al
 In `App`:
 
 ```rust
-    network_buffers: std::collections::HashMap<ViewId, orthogonal_core::devtools::NetworkBuffer>,
-    network_rx: std::sync::mpsc::Receiver<(ViewId, orthogonal_core::devtools::NetEntry)>,
-    network_tx: std::sync::mpsc::Sender<(ViewId, orthogonal_core::devtools::NetEntry)>,
+    network_buffers: std::collections::HashMap<ViewId, hodei_core::devtools::NetworkBuffer>,
+    network_rx: std::sync::mpsc::Receiver<(ViewId, hodei_core::devtools::NetEntry)>,
+    network_tx: std::sync::mpsc::Sender<(ViewId, hodei_core::devtools::NetEntry)>,
 ```
 
 Initialize the channel + empty map in `App::new`. When a tile is created, register the listener.
@@ -3096,16 +3096,16 @@ fn base64_encode(s: &str) -> String {
 }
 ```
 
-Add `base64 = "0.22"` to `crates/orthogonal-app/Cargo.toml` if needed.
+Add `base64 = "0.22"` to `crates/hodei-app/Cargo.toml` if needed.
 
 - [ ] **Step 5: Smoke-test**
 
-`cargo run -p orthogonal-app`, open a fetch-heavy page (e.g. `https://news.ycombinator.com`). `:network` should open a side tile with a captured request log (or the fallback message if Servo's API doesn't expose one in this build).
+`cargo run -p hodei-app`, open a fetch-heavy page (e.g. `https://news.ycombinator.com`). `:network` should open a side tile with a captured request log (or the fallback message if Servo's API doesn't expose one in this build).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add crates/orthogonal-core/src/devtools.rs crates/orthogonal-app
+git add crates/hodei-core/src/devtools.rs crates/hodei-app
 git commit -m "feat(devtools): :network opens per-tile request log (with fallback)"
 ```
 
@@ -3115,17 +3115,17 @@ git commit -m "feat(devtools): :network opens per-tile request log (with fallbac
 
 **Goal:** Run through the spec's manual-checklist golden paths end-to-end. Update spec status. Commit.
 
-- [ ] **Step 1: Manual checklist (run from `/Users/enekosarasola/orthogonal`)**
+- [ ] **Step 1: Manual checklist (run from `/Users/enekosarasola/hodei`)**
 
 Pre-flight:
 - `mairu context-server -p 8788 &` (in another terminal)
-- `cargo run -p orthogonal-app`
+- `cargo run -p hodei-app`
 
 Checklist (write a one-line note next to each PASS/FAIL):
 
-- [ ] Open agent tile with `:agent` — tile loads `http://127.0.0.1:8788/agent?…` (404 from mairu is OK if mairu doesn't have the route yet; orthogonal's part is the request).
+- [ ] Open agent tile with `:agent` — tile loads `http://127.0.0.1:8788/agent?…` (404 from mairu is OK if mairu doesn't have the route yet; hodei's part is the request).
 - [ ] `:project mairu` shows `[proj:mairu]` in HUD.
-- [ ] `:project --workspace orthogonal` followed by `:project --clear` shows `[proj:orthogonal]`.
+- [ ] `:project --workspace hodei` followed by `:project --clear` shows `[proj:hodei]`.
 - [ ] `:scrape https://news.ycombinator.com` opens a reader tile (assuming mairu's `/scrape/web` is wired).
 - [ ] `:diff` against a known repo URL with mapping in config produces blast-radius panel.
 - [ ] `:skill` opens skill palette; j/k navigates; Enter prints status; Esc closes.
@@ -3137,7 +3137,7 @@ Checklist (write a one-line note next to each PASS/FAIL):
 
 - [ ] **Step 2: Update spec status**
 
-Edit `docs/superpowers/specs/2026-04-19-orthogonal-mairu-phase-1-design.md` line 3:
+Edit `docs/superpowers/specs/2026-04-19-hodei-mairu-phase-1-design.md` line 3:
 
 ```markdown
 **Status:** Implemented (Phase 1 complete YYYY-MM-DD)
@@ -3148,8 +3148,8 @@ Edit `docs/superpowers/specs/2026-04-19-orthogonal-mairu-phase-1-design.md` line
 - [ ] **Step 3: Commit**
 
 ```bash
-git add docs/superpowers/specs/2026-04-19-orthogonal-mairu-phase-1-design.md
-git commit -m "docs(spec): mark Orthogonal × Mairu Phase 1 as implemented"
+git add docs/superpowers/specs/2026-04-19-hodei-mairu-phase-1-design.md
+git commit -m "docs(spec): mark Hodei × Mairu Phase 1 as implemented"
 ```
 
 ---

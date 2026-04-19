@@ -1,4 +1,4 @@
-use orthogonal_core::types::*;
+use hodei_core::types::*;
 
 /// Convert a core key event to a Servo InputEvent.
 pub fn core_key_to_servo(event: &CoreKeyEvent) -> servo::InputEvent {
@@ -12,6 +12,10 @@ pub fn core_key_to_servo(event: &CoreKeyEvent) -> servo::InputEvent {
         CoreKey::Right => servo::Key::Named(servo::NamedKey::ArrowRight),
         CoreKey::Up => servo::Key::Named(servo::NamedKey::ArrowUp),
         CoreKey::Down => servo::Key::Named(servo::NamedKey::ArrowDown),
+        CoreKey::Home => servo::Key::Named(servo::NamedKey::Home),
+        CoreKey::End => servo::Key::Named(servo::NamedKey::End),
+        CoreKey::PageUp => servo::Key::Named(servo::NamedKey::PageUp),
+        CoreKey::PageDown => servo::Key::Named(servo::NamedKey::PageDown),
     };
 
     let state = match event.state {

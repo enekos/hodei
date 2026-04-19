@@ -73,6 +73,10 @@ pub enum CoreKey {
     Right,
     Up,
     Down,
+    Home,
+    End,
+    PageUp,
+    PageDown,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -158,6 +162,8 @@ pub struct TileRow {
 pub enum MetadataEvent {
     UrlChanged { view_id: ViewId, url: String },
     TitleChanged { view_id: ViewId, title: String },
+    StatusTextChanged { view_id: ViewId, text: Option<String> },
+    FrameReady { view_id: ViewId },
 }
 
 #[cfg(test)]

@@ -233,6 +233,73 @@ impl BspLayout {
         }
     }
 
+    pub fn reset_splits(&mut self) {
+        if let Some(ref mut root) = self.root {
+            Self::reset_node(root);
+        }
+    }
+
+    fn reset_node(node: &mut Node) {
+        match node {
+            Node::Branch { ratio, first, second, .. } => {
+                *ratio = 0.5;
+                Self::reset_node(first);
+                Self::reset_node(second);
+            }
+            _ => {}
+        }
+    }
+
+    pub fn swap_tiles(&mut self, a: ViewId, b: ViewId) {
+        if let Some(ref mut root) = self.root {
+            Self::swap_node(root, a, b);
+        }
+    }
+
+    fn swap_node(node: &mut Node, a: ViewId, b: ViewId) {
+        match node {
+            Node::Leaf { view_id } => {
+                if *view_id == a {
+                    *view_id = b;
+                } else if *view_id == b {
+                    *view_id = a;
+                }
+            }
+            Node::Branch { first, second, .. } => {
+                Self::swap_node(first, a, b);
+                Self::swap_node(second, a, b);
+            }
+        }
+    }
+
+    pub fn next_focus(&self, current: ViewId) -> Option<ViewId> {
+        let resolved = self.resolve();
+        let positions: Vec<ViewId> = resolved.into_iter().map(|(id, _)| id).collect();
+        if positions.is_empty() {
+            return None;
+        }
+        if let Some(idx) = positions.iter().position(|&id| id == current) {
+            let next_idx = (idx + 1) % positions.len();
+            Some(positions[next_idx])
+        } else {
+            positions.first().copied()
+        }
+    }
+
+    pub fn prev_focus(&self, current: ViewId) -> Option<ViewId> {
+        let resolved = self.resolve();
+        let positions: Vec<ViewId> = resolved.into_iter().map(|(id, _)| id).collect();
+        if positions.is_empty() {
+            return None;
+        }
+        if let Some(idx) = positions.iter().position(|&id| id == current) {
+            let prev_idx = if idx == 0 { positions.len() - 1 } else { idx - 1 };
+            Some(positions[prev_idx])
+        } else {
+            positions.first().copied()
+        }
+    }
+
     /// Serialize to BFS-order node rows for SQLite storage.
     pub fn serialize(&self) -> (Vec<LayoutNodeRow>, Option<ViewId>) {
         let mut rows = Vec::new();
@@ -459,5 +526,45 @@ mod tests {
         let restored = BspLayout::deserialize(vp(), &nodes, focused);
         assert_eq!(layout.resolve(), restored.resolve());
         assert_eq!(restored.focused(), Some(ViewId(1)));
+    }
+
+    #[test]
+    fn reset_splits_equalizes() {
+        let mut layout = BspLayout::new(vp());
+        layout.add_first_view(ViewId(1));
+        layout.split(ViewId(1), SplitDirection::Vertical, ViewId(2));
+        layout.resize_split(ViewId(1), 0.2);
+        layout.reset_splits();
+        let resolved = layout.resolve();
+        assert!((resolved[0].1.width - 400.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn swap_tiles_exchanges_ids() {
+        let mut layout = BspLayout::new(vp());
+        layout.add_first_view(ViewId(1));
+        layout.split(ViewId(1), SplitDirection::Vertical, ViewId(2));
+        layout.swap_tiles(ViewId(1), ViewId(2));
+        let resolved = layout.resolve();
+        assert_eq!(resolved[0].0, ViewId(2));
+        assert_eq!(resolved[1].0, ViewId(1));
+    }
+
+    #[test]
+    fn next_focus_cycles() {
+        let mut layout = BspLayout::new(vp());
+        layout.add_first_view(ViewId(1));
+        layout.split(ViewId(1), SplitDirection::Vertical, ViewId(2));
+        assert_eq!(layout.next_focus(ViewId(1)), Some(ViewId(2)));
+        assert_eq!(layout.next_focus(ViewId(2)), Some(ViewId(1)));
+    }
+
+    #[test]
+    fn prev_focus_cycles() {
+        let mut layout = BspLayout::new(vp());
+        layout.add_first_view(ViewId(1));
+        layout.split(ViewId(1), SplitDirection::Vertical, ViewId(2));
+        assert_eq!(layout.prev_focus(ViewId(2)), Some(ViewId(1)));
+        assert_eq!(layout.prev_focus(ViewId(1)), Some(ViewId(2)));
     }
 }

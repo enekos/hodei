@@ -51,6 +51,10 @@ impl KeyCombo {
             "right" => CoreKey::Right,
             "up" => CoreKey::Up,
             "down" => CoreKey::Down,
+            "home" => CoreKey::Home,
+            "end" => CoreKey::End,
+            "pageup" => CoreKey::PageUp,
+            "pagedown" => CoreKey::PageDown,
             s if s.len() == 1 => {
                 let ch = s.chars().next()?;
                 if ch.is_uppercase() {
@@ -114,10 +118,31 @@ pub enum Action {
     ZoomOut,
     ZoomReset,
     YankUrl,
+    YankTitle,
     WorkspaceSwitch(String),
     WorkspaceNew(String),
     WorkspaceDelete(String),
     WorkspaceList,
+    FocusNext,
+    FocusPrev,
+    ScrollPageDown,
+    ScrollPageUp,
+    ScrollToTop,
+    ScrollToBottom,
+    HardReload,
+    PasteNavigate,
+    PasteNewTile,
+    DuplicateTile,
+    ViewSource,
+    GoHome,
+    GoUp,
+    GoToRoot,
+    ResetSplits,
+    SwapTiles,
+    SetQuickmark(u8),
+    JumpQuickmark(u8),
+    ToggleTheme,
+    ShowShortcuts,
 }
 
 // === Router ===
@@ -177,7 +202,31 @@ impl InputRouter {
         map.insert(KeyCombo::new(CoreKey::Char('-'), false, false), Action::ZoomOut);
         map.insert(KeyCombo::new(CoreKey::Char('0'), false, false), Action::ZoomReset);
         map.insert(KeyCombo::new(CoreKey::Char('y'), false, false), Action::YankUrl);
+        map.insert(KeyCombo::new(CoreKey::Char('Y'), false, false), Action::YankTitle);
         map.insert(KeyCombo::new(CoreKey::Char('B'), false, false), Action::ShowBookmarks(String::new()));
+        map.insert(KeyCombo::new(CoreKey::Tab, true, false), Action::FocusNext);
+        map.insert(KeyCombo::new(CoreKey::Tab, true, true), Action::FocusPrev);
+        map.insert(KeyCombo::new(CoreKey::Char('d'), true, false), Action::ScrollPageDown);
+        map.insert(KeyCombo::new(CoreKey::Char('u'), true, false), Action::ScrollPageUp);
+        map.insert(KeyCombo::new(CoreKey::Char('R'), false, false), Action::HardReload);
+        map.insert(KeyCombo::new(CoreKey::Char('p'), false, false), Action::PasteNavigate);
+        map.insert(KeyCombo::new(CoreKey::Char('P'), false, false), Action::PasteNewTile);
+        map.insert(KeyCombo::new(CoreKey::Char('D'), false, false), Action::DuplicateTile);
+        map.insert(KeyCombo::new(CoreKey::Char('F'), false, false), Action::ViewSource);
+        map.insert(KeyCombo::new(CoreKey::Char('G'), false, false), Action::GoHome);
+        map.insert(KeyCombo::new(CoreKey::Home, false, false), Action::ScrollToTop);
+        map.insert(KeyCombo::new(CoreKey::End, false, false), Action::ScrollToBottom);
+        map.insert(KeyCombo::new(CoreKey::PageUp, false, false), Action::ScrollPageUp);
+        map.insert(KeyCombo::new(CoreKey::PageDown, false, false), Action::ScrollPageDown);
+        map.insert(KeyCombo::new(CoreKey::Char('='), false, false), Action::ResetSplits);
+        map.insert(KeyCombo::new(CoreKey::Char('z'), false, false), Action::SwapTiles);
+        map.insert(KeyCombo::new(CoreKey::Char('t'), false, false), Action::ToggleTheme);
+        map.insert(KeyCombo::new(CoreKey::Char('?'), false, false), Action::ShowShortcuts);
+        for i in 0..=9u8 {
+            let c = (b'0' + i) as char;
+            map.insert(KeyCombo::new(CoreKey::Char(c), true, false), Action::JumpQuickmark(i));
+            map.insert(KeyCombo::new(CoreKey::Char(c), false, true), Action::SetQuickmark(i));
+        }
         map
     }
 
@@ -187,10 +236,13 @@ impl InputRouter {
             "focus_down" => Some(Action::FocusNeighbor(Direction::Down)),
             "focus_up" => Some(Action::FocusNeighbor(Direction::Up)),
             "focus_right" => Some(Action::FocusNeighbor(Direction::Right)),
+            "focus_next" => Some(Action::FocusNext),
+            "focus_prev" => Some(Action::FocusPrev),
             "split_vertical" => Some(Action::SplitView(SplitDirection::Vertical)),
             "split_horizontal" => Some(Action::SplitView(SplitDirection::Horizontal)),
             "close" => Some(Action::CloseView),
             "reload" => Some(Action::Reload),
+            "hard_reload" => Some(Action::HardReload),
             "back" => Some(Action::Back),
             "forward" => Some(Action::Forward),
             "insert" => Some(Action::EnterInsert),
@@ -203,7 +255,19 @@ impl InputRouter {
             "zoom_out" => Some(Action::ZoomOut),
             "zoom_reset" => Some(Action::ZoomReset),
             "yank_url" => Some(Action::YankUrl),
+            "yank_title" => Some(Action::YankTitle),
             "bookmarks" => Some(Action::ShowBookmarks(String::new())),
+            "scroll_page_down" => Some(Action::ScrollPageDown),
+            "scroll_page_up" => Some(Action::ScrollPageUp),
+            "paste_navigate" => Some(Action::PasteNavigate),
+            "paste_new_tile" => Some(Action::PasteNewTile),
+            "duplicate_tile" => Some(Action::DuplicateTile),
+            "view_source" => Some(Action::ViewSource),
+            "go_home" => Some(Action::GoHome),
+            "reset_splits" => Some(Action::ResetSplits),
+            "swap_tiles" => Some(Action::SwapTiles),
+            "toggle_theme" => Some(Action::ToggleTheme),
+            "shortcuts" => Some(Action::ShowShortcuts),
             _ => None,
         }
     }
@@ -395,6 +459,8 @@ impl InputRouter {
                 let query = parts.get(1).unwrap_or(&"").to_string();
                 vec![Action::ShowHistory(query)]
             }
+            Some("up") => vec![Action::GoUp],
+            Some("root") => vec![Action::GoToRoot],
             Some("workspace" | "ws") => {
                 if let Some(name) = parts.get(1) {
                     vec![Action::WorkspaceSwitch(name.to_string())]
@@ -755,5 +821,12 @@ mod tests {
         let combo = KeyCombo::parse("ctrl+v").unwrap();
         assert_eq!(combo.key, CoreKey::Char('v'));
         assert!(combo.ctrl);
+    }
+
+    #[test]
+    fn question_mark_shows_shortcuts() {
+        let mut router = InputRouter::new();
+        let actions = router.handle(&key('?'));
+        assert_eq!(actions, vec![Action::ShowShortcuts]);
     }
 }

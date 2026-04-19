@@ -1,10 +1,10 @@
 [package]
-name = "orthogonal-servo"
+name = "hodei-servo"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-orthogonal-core = { path = "../orthogonal-core" }
+hodei-core = { path = "../hodei-core" }
 servo = { path = "../../servo/components/servo" }
 url = "2"
 log = "0.4"

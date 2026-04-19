@@ -5,21 +5,21 @@ use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::window::{Window, WindowAttributes, WindowId};
 use glow::HasContext;
 
-use orthogonal_core::bookmarks::BookmarkManager;
-use orthogonal_core::compositor::Compositor;
-use orthogonal_core::config::Config;
-use orthogonal_core::db;
-use orthogonal_core::hint;
-use orthogonal_core::history::HistoryManager;
-use orthogonal_core::search;
-use orthogonal_core::hud::Hud;
-use orthogonal_core::input::{Action, InputRouter, Mode};
-use orthogonal_core::layout::BspLayout;
-use orthogonal_core::suggest::{self, Suggestion, SuggestionSource};
-use orthogonal_core::types::*;
-use orthogonal_core::view::ViewManager;
-use orthogonal_core::workspace::WorkspaceManager;
-use orthogonal_servo::Engine;
+use hodei_core::bookmarks::BookmarkManager;
+use hodei_core::compositor::Compositor;
+use hodei_core::config::Config;
+use hodei_core::db;
+use hodei_core::hint;
+use hodei_core::history::HistoryManager;
+use hodei_core::search;
+use hodei_core::hud::Hud;
+use hodei_core::input::{Action, InputRouter, Mode};
+use hodei_core::layout::BspLayout;
+use hodei_core::suggest::{self, Suggestion, SuggestionSource};
+use hodei_core::types::*;
+use hodei_core::view::ViewManager;
+use hodei_core::workspace::WorkspaceManager;
+use hodei_servo::Engine;
 
 use crate::UserEvent;
 
@@ -28,8 +28,8 @@ struct WinitWaker {
     proxy: EventLoopProxy<UserEvent>,
 }
 
-impl orthogonal_servo::ServoEventLoopWaker for WinitWaker {
-    fn clone_box(&self) -> Box<dyn orthogonal_servo::ServoEventLoopWaker> {
+impl hodei_servo::ServoEventLoopWaker for WinitWaker {
+    fn clone_box(&self) -> Box<dyn hodei_servo::ServoEventLoopWaker> {
         Box::new(WinitWaker {
             proxy: self.proxy.clone(),
         })
@@ -72,13 +72,23 @@ pub struct App {
     current_search_result: search::SearchResult,
     // Zoom state (per tile zoom level)
     tile_zoom_levels: std::collections::HashMap<ViewId, f32>,
+    // Last focused tile for swap
+    last_focused: Option<ViewId>,
+    // Status text per tile (hover URL)
+    status_texts: std::collections::HashMap<ViewId, String>,
+    // Theme toggle state
+    theme_dark: bool,
+    // Keyboard shortcuts modal state
+    show_shortcuts: bool,
+    // Set by notify_new_frame_ready; cleared after paint_tile is called
+    pending_paint: bool,
 }
 
 impl App {
     pub fn new(proxy: EventLoopProxy<UserEvent>) -> Self {
         let config_path = dirs::config_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("orthogonal")
+            .join("hodei")
             .join("config.toml");
         let config = Config::load(&config_path);
         let input = InputRouter::with_overrides(&config.keybindings);
@@ -112,6 +122,11 @@ impl App {
             search_result_rx,
             current_search_result: search::SearchResult { index: 0, count: 0 },
             tile_zoom_levels: std::collections::HashMap::new(),
+            last_focused: None,
+            status_texts: std::collections::HashMap::new(),
+            theme_dark: false,
+            show_shortcuts: false,
+            pending_paint: false,
         }
     }
 
@@ -451,6 +466,217 @@ impl App {
                         }
                     }
                 }
+                Action::FocusNext => {
+                    if let Some(focused) = self.layout.focused() {
+                        if let Some(next) = self.layout.next_focus(focused) {
+                            self.last_focused = Some(focused);
+                            self.layout.set_focused(next);
+                            self.update_hud();
+                        }
+                    }
+                }
+                Action::FocusPrev => {
+                    if let Some(focused) = self.layout.focused() {
+                        if let Some(prev) = self.layout.prev_focus(focused) {
+                            self.last_focused = Some(focused);
+                            self.layout.set_focused(prev);
+                            self.update_hud();
+                        }
+                    }
+                }
+                Action::ScrollPageDown => {
+                    if let Some(focused) = self.layout.focused() {
+                        self.inject_scroll(focused, "window.scrollBy(0, window.innerHeight / 2)");
+                    }
+                }
+                Action::ScrollPageUp => {
+                    if let Some(focused) = self.layout.focused() {
+                        self.inject_scroll(focused, "window.scrollBy(0, -window.innerHeight / 2)");
+                    }
+                }
+                Action::ScrollToTop => {
+                    if let Some(focused) = self.layout.focused() {
+                        self.inject_scroll(focused, "window.scrollTo(0, 0)");
+                    }
+                }
+                Action::ScrollToBottom => {
+                    if let Some(focused) = self.layout.focused() {
+                        self.inject_scroll(focused, "window.scrollTo(0, document.body.scrollHeight)");
+                    }
+                }
+                Action::HardReload => {
+                    if let Some(focused) = self.layout.focused() {
+                        if let Some(engine) = &self.engine {
+                            engine.hard_reload(focused);
+                        }
+                    }
+                }
+                Action::PasteNavigate => {
+                    if let Some(url) = self.read_clipboard() {
+                        let url = if url.starts_with("http://") || url.starts_with("https://") {
+                            url
+                        } else {
+                            self.config.search_url(&url)
+                        };
+                        if let Some(focused) = self.layout.focused() {
+                            if let Some(engine) = &self.engine {
+                                engine.navigate(focused, &url);
+                            }
+                            if let Some(view) = self.views.get_mut(focused) {
+                                view.url = url;
+                            }
+                        }
+                        self.update_hud();
+                    }
+                }
+                Action::PasteNewTile => {
+                    if let Some(url) = self.read_clipboard() {
+                        let url = if url.starts_with("http://") || url.starts_with("https://") {
+                            url
+                        } else {
+                            self.config.search_url(&url)
+                        };
+                        if let Some(focused) = self.layout.focused() {
+                            let new_id = self.views.create(&url);
+                            self.layout.split(focused, hodei_core::types::SplitDirection::Vertical, new_id);
+                            if let Some(engine) = &mut self.engine {
+                                engine.create_tile(new_id, &url);
+                            }
+                            self.update_hud();
+                            self.request_redraw();
+                        }
+                    }
+                }
+                Action::DuplicateTile => {
+                    if let Some(focused) = self.layout.focused() {
+                        if let Some(view) = self.views.get(focused) {
+                            let url = view.url.clone();
+                            let new_id = self.views.create(&url);
+                            self.layout.split(focused, hodei_core::types::SplitDirection::Vertical, new_id);
+                            if let Some(engine) = &mut self.engine {
+                                engine.create_tile(new_id, &url);
+                            }
+                            self.update_hud();
+                            self.request_redraw();
+                        }
+                    }
+                }
+                Action::YankTitle => {
+                    if let Some(focused) = self.layout.focused() {
+                        if let Some(view) = self.views.get(focused) {
+                            self.copy_to_clipboard(&view.title);
+                            log::info!("Yanked title: {}", view.title);
+                        }
+                    }
+                }
+                Action::ViewSource => {
+                    if let Some(focused) = self.layout.focused() {
+                        if let Some(view) = self.views.get(focused) {
+                            let url = format!("view-source:{}", view.url);
+                            if let Some(engine) = &self.engine {
+                                engine.navigate(focused, &url);
+                            }
+                        }
+                    }
+                }
+                Action::GoHome => {
+                    if let Some(focused) = self.layout.focused() {
+                        let url = self.config.general.startup_url.clone();
+                        if let Some(engine) = &self.engine {
+                            engine.navigate(focused, &url);
+                        }
+                        if let Some(view) = self.views.get_mut(focused) {
+                            view.url = url;
+                        }
+                        self.update_hud();
+                    }
+                }
+                Action::GoUp => {
+                    if let Some(focused) = self.layout.focused() {
+                        if let Some(view) = self.views.get(focused) {
+                            if let Ok(mut url) = url::Url::parse(&view.url) {
+                                let path = url.path().to_string();
+                                let new_path = std::path::Path::new(&path)
+                                    .parent()
+                                    .and_then(|p| p.to_str())
+                                    .unwrap_or("/");
+                                let _ = url.set_path(new_path);
+                                let url_str = url.to_string();
+                                if let Some(engine) = &self.engine {
+                                    engine.navigate(focused, &url_str);
+                                }
+                                self.views.get_mut(focused).unwrap().url = url_str;
+                                self.update_hud();
+                            }
+                        }
+                    }
+                }
+                Action::GoToRoot => {
+                    if let Some(focused) = self.layout.focused() {
+                        if let Some(view) = self.views.get(focused) {
+                            if let Ok(mut url) = url::Url::parse(&view.url) {
+                                let _ = url.set_path("/");
+                                let url_str = url.to_string();
+                                if let Some(engine) = &self.engine {
+                                    engine.navigate(focused, &url_str);
+                                }
+                                self.views.get_mut(focused).unwrap().url = url_str;
+                                self.update_hud();
+                            }
+                        }
+                    }
+                }
+                Action::ResetSplits => {
+                    self.layout.reset_splits();
+                    self.request_redraw();
+                }
+                Action::SwapTiles => {
+                    if let Some(focused) = self.layout.focused() {
+                        if let Some(last) = self.last_focused {
+                            if last != focused {
+                                self.layout.swap_tiles(focused, last);
+                                self.last_focused = Some(focused);
+                                self.request_redraw();
+                            }
+                        }
+                    }
+                }
+                Action::SetQuickmark(slot) => {
+                    if let Some(bookmarks) = &self.bookmarks {
+                        if let Some(focused) = self.layout.focused() {
+                            if let Some(view) = self.views.get(focused) {
+                                let _ = bookmarks.set_quickmark(slot, &view.url, &view.title);
+                                log::info!("Quickmark {} set: {}", slot, view.url);
+                            }
+                        }
+                    }
+                }
+                Action::JumpQuickmark(slot) => {
+                    if let Some(bookmarks) = &self.bookmarks {
+                        if let Ok(Some(qm)) = bookmarks.get_quickmark(slot) {
+                            if let Some(focused) = self.layout.focused() {
+                                if let Some(engine) = &self.engine {
+                                    engine.navigate(focused, &qm.url);
+                                }
+                                if let Some(view) = self.views.get_mut(focused) {
+                                    view.url = qm.url;
+                                }
+                                self.update_hud();
+                            }
+                        }
+                    }
+                }
+                Action::ToggleTheme => {
+                    self.theme_dark = !self.theme_dark;
+                    if let Some(engine) = &self.engine {
+                        engine.set_theme(self.theme_dark);
+                    }
+                    log::info!("Theme toggled: {}", if self.theme_dark { "dark" } else { "light" });
+                }
+                Action::ShowShortcuts => {
+                    self.show_shortcuts = !self.show_shortcuts;
+                    self.update_hud();
+                }
             }
         }
     }
@@ -556,7 +782,11 @@ impl App {
                     hud.set_url_text(&view.url);
                     hud.set_title_text(&view.title);
                 }
+                let status = self.status_texts.get(&focused).cloned().unwrap_or_default();
+                hud.set_status_text(&status);
             }
+
+            hud.set_shortcuts_visible(self.show_shortcuts);
 
             hud.request_redraw();
         }
@@ -604,6 +834,22 @@ impl App {
                         view.title = title;
                         needs_hud_update = true;
                     }
+                }
+                MetadataEvent::StatusTextChanged { view_id, text } => {
+                    if let Some(t) = text {
+                        if !t.is_empty() {
+                            self.status_texts.insert(view_id, t);
+                        } else {
+                            self.status_texts.remove(&view_id);
+                        }
+                    } else {
+                        self.status_texts.remove(&view_id);
+                    }
+                    needs_hud_update = true;
+                }
+                MetadataEvent::FrameReady { .. } => {
+                    self.pending_paint = true;
+                    self.request_redraw();
                 }
             }
         }
@@ -710,11 +956,13 @@ impl App {
 
     fn apply_zoom(&self, view_id: ViewId, zoom: f32) {
         if let Some(engine) = &self.engine {
-            let script = format!(
-                "(function() {{ document.body.style.zoom = '{}'; }})()",
-                zoom
-            );
-            engine.evaluate_js(view_id, &script, Box::new(|_| {}));
+            engine.set_page_zoom(view_id, zoom);
+        }
+    }
+
+    fn inject_scroll(&self, view_id: ViewId, script: &str) {
+        if let Some(engine) = &self.engine {
+            engine.evaluate_js(view_id, script, Box::new(|_| {}));
         }
     }
 
@@ -738,6 +986,25 @@ impl App {
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(text.as_bytes());
         }
+    }
+
+    fn read_clipboard(&self) -> Option<String> {
+        use std::process::{Command, Stdio};
+        #[cfg(target_os = "macos")]
+        let output = Command::new("pbpaste")
+            .stdout(Stdio::piped())
+            .output()
+            .ok()?;
+        #[cfg(target_os = "linux")]
+        let output = Command::new("wl-paste")
+            .stdout(Stdio::piped())
+            .output()
+            .or_else(|_| Command::new("xclip").args(["-selection", "clipboard", "-o"]).stdout(Stdio::piped()).output())
+            .ok()?;
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        compile_error!("clipboard not implemented for this OS");
+
+        String::from_utf8(output.stdout).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
     }
 
     fn click_to_focus(&mut self, x: f32, y: f32) {
@@ -844,6 +1111,10 @@ impl App {
             Key::Named(NamedKey::ArrowRight) => CoreKey::Right,
             Key::Named(NamedKey::ArrowUp) => CoreKey::Up,
             Key::Named(NamedKey::ArrowDown) => CoreKey::Down,
+            Key::Named(NamedKey::Home) => CoreKey::Home,
+            Key::Named(NamedKey::End) => CoreKey::End,
+            Key::Named(NamedKey::PageUp) => CoreKey::PageUp,
+            Key::Named(NamedKey::PageDown) => CoreKey::PageDown,
             Key::Character(c) => {
                 let ch = c.chars().next()?;
                 CoreKey::Char(ch)
@@ -894,7 +1165,7 @@ impl ApplicationHandler<UserEvent> for App {
         let window = event_loop
             .create_window(
                 WindowAttributes::default()
-                    .with_title("Orthogonal")
+                    .with_title("Hodei")
                     .with_inner_size(winit::dpi::PhysicalSize::new(1280u32, 720u32)),
             )
             .expect("Failed to create window");
@@ -918,8 +1189,8 @@ impl ApplicationHandler<UserEvent> for App {
         // Open database and initialize managers
         let db_path = dirs::data_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("orthogonal")
-            .join("orthogonal.db");
+            .join("hodei")
+            .join("hodei.db");
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).ok();
         }
@@ -959,6 +1230,16 @@ impl ApplicationHandler<UserEvent> for App {
             engine.create_tile(view_id, startup_url);
         }
 
+        // Resize all tiles to match the initial layout rects (tiles default to 800×600).
+        let resolved = self.layout.resolve();
+        for (view_id, rect) in &resolved {
+            engine.resize_tile(*view_id, rect.width as u32, rect.height as u32);
+        }
+
+        // Ensure window context is current before creating compositor resources (VAO, shaders).
+        // create_tile() above may have switched the active GL context to an offscreen one.
+        engine.prepare_window_for_rendering();
+
         // Initialize compositor
         let gl = engine.gl_context();
         let compositor = unsafe { Compositor::new(&gl, size.width, size.height) };
@@ -968,6 +1249,7 @@ impl ApplicationHandler<UserEvent> for App {
         self.hud = Some(hud);
         self.compositor = Some(compositor);
         self.update_hud();
+        self.request_redraw();
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -979,6 +1261,16 @@ impl ApplicationHandler<UserEvent> for App {
 
             WindowEvent::KeyboardInput { event, .. } => {
                 if let Some(core_event) = self.convert_key_event(&event) {
+                    if self.show_shortcuts {
+                        if core_event.state == KeyState::Pressed
+                            && (core_event.key == CoreKey::Escape
+                                || core_event.key == CoreKey::Char('?'))
+                        {
+                            self.show_shortcuts = false;
+                            self.update_hud();
+                        }
+                        return;
+                    }
                     let actions = self.input.handle(&core_event);
                     self.dispatch_actions(actions);
                 }
@@ -998,11 +1290,27 @@ impl ApplicationHandler<UserEvent> for App {
 
             WindowEvent::MouseInput { state: button_state, button, .. } => {
                 let (mx, my) = self.mouse_position;
+                // Handle mouse back/forward buttons for navigation
+                if button_state == winit::event::ElementState::Pressed {
+                    match button {
+                        winit::event::MouseButton::Back => {
+                            self.dispatch_actions(vec![Action::Back]);
+                            return;
+                        }
+                        winit::event::MouseButton::Forward => {
+                            self.dispatch_actions(vec![Action::Forward]);
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
                 let core_button = match button {
                     winit::event::MouseButton::Left => MouseButton::Left,
                     winit::event::MouseButton::Right => MouseButton::Right,
                     winit::event::MouseButton::Middle => MouseButton::Middle,
-                    _ => MouseButton::Left,
+                    winit::event::MouseButton::Back => MouseButton::Left,
+                    winit::event::MouseButton::Forward => MouseButton::Left,
+                    winit::event::MouseButton::Other(_) => MouseButton::Left,
                 };
                 let event = match button_state {
                     winit::event::ElementState::Pressed => CoreMouseEvent::Down {
@@ -1060,18 +1368,32 @@ impl ApplicationHandler<UserEvent> for App {
             }
 
             WindowEvent::RedrawRequested => {
-                // Paint all tiles first
-                if let Some(engine) = &self.engine {
-                    let resolved = self.layout.resolve();
-                    for (view_id, _) in &resolved {
-                        engine.paint_tile(*view_id);
-                    }
-                }
+                if self.pending_paint {
+                    self.pending_paint = false;
 
-                // Upload tile pixels to GL textures (borrows self mutably for tile_textures)
-                if let Some(engine) = &self.engine {
-                    let gl = engine.gl_context();
-                    unsafe { self.update_tile_textures(&gl); }
+                    // Paint all tiles (renders Servo's latest frame into offscreen FBOs)
+                    if let Some(engine) = &self.engine {
+                        let resolved = self.layout.resolve();
+                        for (view_id, _) in &resolved {
+                            engine.paint_tile(*view_id);
+                        }
+                    }
+
+                    // Switch to window context before texture upload.
+                    if let Some(engine) = &self.engine {
+                        engine.prepare_window_for_rendering();
+                    }
+
+                    // Upload tile pixels to GL textures
+                    if let Some(engine) = &self.engine {
+                        let gl = engine.gl_context();
+                        unsafe { self.update_tile_textures(&gl); }
+                    }
+
+                    // Restore surfman surface FBO — tile_pixels() binds the offscreen FBO via gleam.
+                    if let Some(engine) = &self.engine {
+                        engine.prepare_window_for_rendering();
+                    }
                 }
 
                 // Composite and present

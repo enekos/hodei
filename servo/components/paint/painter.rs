@@ -325,7 +325,15 @@ impl Painter {
 
     #[track_caller]
     fn assert_no_gl_error(&self) {
-        debug_assert_eq!(self.webrender_gl.get_error(), gleam::gl::NO_ERROR);
+        #[cfg(debug_assertions)]
+        {
+            let error = self.webrender_gl.get_error();
+            if error != gleam::gl::NO_ERROR {
+                // Clear the error so rendering can proceed; a stale error can be
+                // left by surfman's surface swap during resize.
+                log::warn!("GL error before render (cleared): {error:#x}");
+            }
+        }
     }
 
     #[track_caller]

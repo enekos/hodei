@@ -62,7 +62,7 @@ pub struct Hud {
 impl Hud {
     /// Must be called exactly once, before any Slint operations.
     pub fn new(width: u32, height: u32) -> Self {
-        let sw_window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
+        let sw_window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
         sw_window.set_size(slint::PhysicalSize::new(width, height));
 
         slint::platform::set_platform(Box::new(SlintPlatform {
@@ -72,6 +72,7 @@ impl Hud {
         .expect("set_platform must be called once");
 
         let hud_instance = HudWindow::new().unwrap();
+        hud_instance.show().unwrap();
         let buffer = vec![Rgba8Pixel::default(); (width * height) as usize];
 
         Self {
@@ -88,10 +89,11 @@ impl Hud {
         // Clear buffer to transparent
         self.buffer.fill(Rgba8Pixel::default());
 
+        // We always clear and re-upload to GL, so force Slint to always repaint.
+        self.window.request_redraw();
         self.window.draw_if_needed(|renderer| {
             renderer.render(&mut self.buffer, self.width as usize);
         });
-
         // Safety: Rgba8Pixel is #[repr(C)] with 4 u8 fields
         unsafe {
             std::slice::from_raw_parts(
@@ -170,6 +172,14 @@ impl Hud {
 
     pub fn set_search_info(&self, info: &str) {
         self.hud_instance.set_search_info(SharedString::from(info));
+    }
+
+    pub fn set_status_text(&self, text: &str) {
+        self.hud_instance.set_status_text(SharedString::from(text));
+    }
+
+    pub fn set_shortcuts_visible(&self, visible: bool) {
+        self.hud_instance.set_shortcuts_visible(visible);
     }
 
     pub fn clear_hints(&self) {

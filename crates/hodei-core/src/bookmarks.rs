@@ -71,6 +71,40 @@ impl BookmarkManager {
         )?;
         Ok(count > 0)
     }
+
+    fn quickmark_tag(slot: u8) -> String {
+        format!("__quickmark:{}__", slot)
+    }
+
+    pub fn set_quickmark(&self, slot: u8, url: &str, title: &str) -> Result<(), rusqlite::Error> {
+        let tag = Self::quickmark_tag(slot);
+        // Remove any existing bookmark with this quickmark tag
+        self.conn.execute(
+            "DELETE FROM bookmarks WHERE tags LIKE ?1",
+            params![format!("%{}%", tag)],
+        )?;
+        self.conn.execute(
+            "INSERT OR REPLACE INTO bookmarks (url, title, tags) VALUES (?1, ?2, ?3)",
+            params![url, title, tag],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_quickmark(&self, slot: u8) -> Result<Option<Bookmark>, rusqlite::Error> {
+        let tag = Self::quickmark_tag(slot);
+        let mut stmt = self.conn.prepare(
+            "SELECT url, title, tags, created_at FROM bookmarks WHERE tags LIKE ?1 LIMIT 1"
+        )?;
+        let mut entries = stmt.query_map(params![format!("%{}%", tag)], |row| {
+            Ok(Bookmark {
+                url: row.get(0)?,
+                title: row.get(1)?,
+                tags: row.get(2)?,
+                created_at: row.get(3)?,
+            })
+        })?.collect::<Result<Vec<_>, _>>()?;
+        Ok(entries.pop())
+    }
 }
 
 #[cfg(test)]
@@ -128,5 +162,23 @@ mod tests {
         let all = bm.list_all(10).unwrap();
         assert_eq!(all.len(), 2);
         assert_eq!(all[0].url, "https://b.com");
+    }
+
+    #[test]
+    fn quickmark_set_and_get() {
+        let bm = make_bookmarks();
+        bm.set_quickmark(1, "https://example.com", "Example").unwrap();
+        let qm = bm.get_quickmark(1).unwrap();
+        assert!(qm.is_some());
+        assert_eq!(qm.unwrap().url, "https://example.com");
+    }
+
+    #[test]
+    fn quickmark_overwrites_same_slot() {
+        let bm = make_bookmarks();
+        bm.set_quickmark(2, "https://old.com", "Old").unwrap();
+        bm.set_quickmark(2, "https://new.com", "New").unwrap();
+        let qm = bm.get_quickmark(2).unwrap();
+        assert_eq!(qm.unwrap().url, "https://new.com");
     }
 }

@@ -4,7 +4,7 @@ pub const SEARCH_INIT_SCRIPT: &str = r#"(function() {
     if (!query) return JSON.stringify({ count: 0 });
 
     // Remove any existing highlights
-    const existing = document.getElementById('__orthogonal_search_highlights__');
+    const existing = document.getElementById('__hodei_search_highlights__');
     if (existing) existing.remove();
 
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
@@ -22,7 +22,7 @@ pub const SEARCH_INIT_SCRIPT: &str = r#"(function() {
     }
 
     const container = document.createElement('span');
-    container.id = '__orthogonal_search_highlights__';
+    container.id = '__hodei_search_highlights__';
     container.style.display = 'none';
     document.body.appendChild(container);
 
@@ -44,7 +44,7 @@ pub const SEARCH_INIT_SCRIPT: &str = r#"(function() {
                 parent.insertBefore(document.createTextNode(text.slice(i, idx)), textNode);
             }
             const mark = document.createElement('mark');
-            mark.className = '__orthogonal_search_match__';
+            mark.className = '__hodei_search_match__';
             mark.style.backgroundColor = '#ffcc00';
             mark.style.color = '#000';
             mark.textContent = text.slice(idx, idx + query.length);
@@ -62,7 +62,7 @@ pub const SEARCH_INIT_SCRIPT: &str = r#"(function() {
 /// Argument: offset (+1 for next, -1 for prev).
 pub const SEARCH_NAVIGATE_SCRIPT: &str = r#"(function() {
     const offset = arguments[0];
-    const marks = Array.from(document.querySelectorAll('mark.__orthogonal_search_match__'));
+    const marks = Array.from(document.querySelectorAll('mark.__hodei_search_match__'));
     if (marks.length === 0) return JSON.stringify({ index: 0, count: 0 });
 
     let current = marks.findIndex(m => m.style.outline === '2px solid red');
@@ -84,10 +84,10 @@ pub const SEARCH_NAVIGATE_SCRIPT: &str = r#"(function() {
 
 /// JavaScript injected to clear all search highlights.
 pub const SEARCH_CLEAR_SCRIPT: &str = r#"(function() {
-    const container = document.getElementById('__orthogonal_search_highlights__');
+    const container = document.getElementById('__hodei_search_highlights__');
     if (container) container.remove();
 
-    const marks = document.querySelectorAll('mark.__orthogonal_search_match__');
+    const marks = document.querySelectorAll('mark.__hodei_search_match__');
     for (const mark of marks) {
         const parent = mark.parentNode;
         parent.insertBefore(document.createTextNode(mark.textContent), mark);

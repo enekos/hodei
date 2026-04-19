@@ -1,8 +1,8 @@
-# Orthogonal Browser — v0.1.0 Design Spec
+# Hodei Browser — v0.1.0 Design Spec
 
 ## Overview
 
-Orthogonal is a keyboard-driven tiling web browser built on the Servo engine. It targets power users who want vim-style modal navigation, BSP tiling window management, and zero mouse dependency.
+Hodei is a keyboard-driven tiling web browser built on the Servo engine. It targets power users who want vim-style modal navigation, BSP tiling window management, and zero mouse dependency.
 
 **Core stack:** Servo (rendering), Slint (HUD overlay), Winit (windowing), SQLite/rusqlite (persistence), glow (GL compositing).
 
@@ -13,14 +13,14 @@ Orthogonal is a keyboard-driven tiling web browser built on the Servo engine. It
 ## 1. Module Structure & Crate Layout
 
 ```
-orthogonal/
+hodei/
 ├── Cargo.toml                        # workspace root
 ├── crates/
-│   ├── orthogonal-app/               # binary crate
+│   ├── hodei-app/               # binary crate
 │   │   └── src/
 │   │       ├── main.rs               # CLI args, init logging, launch app
 │   │       └── app.rs                # Winit event loop, top-level orchestration
-│   ├── orthogonal-core/              # library crate — all browser logic
+│   ├── hodei-core/              # library crate — all browser logic
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── view.rs               # WebView wrapper (one per tile)
@@ -30,7 +30,7 @@ orthogonal/
 │   │       ├── hint.rs               # Hint mode logic
 │   │       ├── session.rs            # Session persistence (SQLite)
 │   │       └── hud.rs                # Slint HUD bridge
-│   └── orthogonal-servo/             # library crate — Servo facade
+│   └── hodei-servo/             # library crate — Servo facade
 │       └── src/
 │           ├── lib.rs
 │           ├── delegate.rs           # ServoDelegate + WebViewDelegate impls
@@ -48,13 +48,13 @@ orthogonal/
 
 Three crates with clear dependency direction:
 
-- `orthogonal-servo` — wraps all Servo API surface. When Servo's internals change, only this crate updates. Exports clean types (`Engine`, `Tile`, `TileId`, `EngineEvents`).
-- `orthogonal-core` — all browser logic (layout, input, compositing, hints, sessions, HUD). Depends on `orthogonal-servo` but never imports Servo crates directly. Testable with mock facades. The `view.rs` module holds per-tile application state (`ViewId`, URL, title, dirty flag) and orchestrates calls to the facade — it is the bridge between the layout engine and the servo facade.
-- `orthogonal-app` — binary entrypoint only. Depends on both `core` and `servo`. Initializes Winit, constructs the `App`, and runs the event loop.
+- `hodei-servo` — wraps all Servo API surface. When Servo's internals change, only this crate updates. Exports clean types (`Engine`, `Tile`, `TileId`, `EngineEvents`).
+- `hodei-core` — all browser logic (layout, input, compositing, hints, sessions, HUD). Depends on `hodei-servo` but never imports Servo crates directly. Testable with mock facades. The `view.rs` module holds per-tile application state (`ViewId`, URL, title, dirty flag) and orchestrates calls to the facade — it is the bridge between the layout engine and the servo facade.
+- `hodei-app` — binary entrypoint only. Depends on both `core` and `servo`. Initializes Winit, constructs the `App`, and runs the event loop.
 
 ### Git Submodules
 
-- `servo/` — pinned to a known-good commit. Built from source. The `orthogonal-servo` facade crate depends on `servo` (the `libservo` crate) from this path.
+- `servo/` — pinned to a known-good commit. Built from source. The `hodei-servo` facade crate depends on `servo` (the `libservo` crate) from this path.
 - `ladybird/` — reference only. Not compiled, not linked. Used for architectural inspiration (particularly `LibWebView::ViewImplementation` pattern and IPC boundary design).
 
 ---
@@ -119,19 +119,19 @@ Window resize → `LayoutManager.resize(new_size)` → BSP tree recalculates all
 
 ---
 
-## 3. Servo Facade (`orthogonal-servo`)
+## 3. Servo Facade (`hodei-servo`)
 
-This crate is the sole interface between Orthogonal and Servo. `orthogonal-core` never imports Servo crates.
+This crate is the sole interface between Hodei and Servo. `hodei-core` never imports Servo crates.
 
 ### ID Convention
 
-A single `ViewId` type (a `u64` newtype) is used everywhere — `orthogonal-core` layout, compositor, session, and the servo facade all share this type. It is defined in `orthogonal-core` and re-used by `orthogonal-servo`.
+A single `ViewId` type (a `u64` newtype) is used everywhere — `hodei-core` layout, compositor, session, and the servo facade all share this type. It is defined in `hodei-core` and re-used by `hodei-servo`.
 
 ### Public Types
 
 ```rust
 // Re-exported wrapper types (no Servo imports leak to core)
-pub use orthogonal_core::ViewId;
+pub use hodei_core::ViewId;
 
 pub struct Engine {
     servo: Servo,
@@ -145,7 +145,7 @@ pub struct Tile {
 }
 
 /// Facade-owned type — does NOT re-export Servo's types.
-/// orthogonal-core depends on this, not on Servo crates.
+/// hodei-core depends on this, not on Servo crates.
 pub struct TileState {
     pub url: String,               // plain string, not servo::url::Url
     pub title: String,
@@ -173,7 +173,7 @@ pub trait EngineEvents {
 - `resize_tile(view_id, rect)` — calls `offscreen_context.resize()` + `webview.resize()`.
 - `paint_tile(view_id)` — calls `webview.paint()`. FBO texture is ready to read afterward.
 - `tile_texture(view_id) -> GLuint` — returns the FBO's color attachment texture ID.
-- `send_input(view_id, event: CoreInputEvent)` — translates `CoreInputEvent` (defined in `orthogonal-core`) to Servo's `InputEvent` and forwards to `webview.notify_input_event()`.
+- `send_input(view_id, event: CoreInputEvent)` — translates `CoreInputEvent` (defined in `hodei-core`) to Servo's `InputEvent` and forwards to `webview.notify_input_event()`.
 - `navigate(view_id, url: &str)` — parses URL and calls `webview.load(url)`.
 - `go_back(view_id)` / `go_forward(view_id)` — history navigation.
 - `evaluate_js(view_id, script: &str, callback)` — for hint mode DOM queries.
@@ -476,7 +476,7 @@ impl SessionManager {
 - **Autosave:** On every structural change (split, close, navigate), the app calls `autosave()`. Writes to the `"default"` session via `INSERT OR REPLACE`. Crash recovery restores `"default"`.
 - **Named sessions:** `:save mywork` and `:restore mywork` via command mode.
 - **Tree serialization:** BSP tree flattened to BFS order. Each node gets an index. Branches store direction + ratio. Leaves store `view_id` joining to `tiles` table.
-- **DB location:** `~/.local/share/orthogonal/sessions.db` (XDG on Linux), `~/Library/Application Support/orthogonal/sessions.db` (macOS).
+- **DB location:** `~/.local/share/hodei/sessions.db` (XDG on Linux), `~/Library/Application Support/hodei/sessions.db` (macOS).
 
 ---
 

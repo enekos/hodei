@@ -5755,7 +5755,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a86ed3f5f244b372d6b1a00b72ef7f8876d0bc6a78a4c9985c53614041512063"
 
 [[package]]
-name = "orthogonal-app"
+name = "hodei-app"
 version = "0.1.0"
 dependencies = [
  "dirs",
@@ -5763,15 +5763,16 @@ dependencies = [
  "glow",
  "image",
  "log",
- "orthogonal-core",
- "orthogonal-servo",
+ "hodei-core",
+ "hodei-servo",
  "serde",
  "serde_json",
+ "url",
  "winit",
 ]
 
 [[package]]
-name = "orthogonal-core"
+name = "hodei-core"
 version = "0.1.0"
 dependencies = [
  "dirs",
@@ -5786,14 +5787,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "orthogonal-servo"
+name = "hodei-servo"
 version = "0.1.0"
 dependencies = [
  "dpi",
  "glow",
  "image",
  "log",
- "orthogonal-core",
+ "hodei-core",
  "raw-window-handle",
  "servo",
  "url",

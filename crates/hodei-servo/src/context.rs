@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
-use orthogonal_core::types::ViewId;
+use hodei_core::types::ViewId;
 use servo::RenderingContext;
 
 /// Manages the WindowRenderingContext and per-tile OffscreenRenderingContexts.
@@ -54,6 +54,13 @@ impl RenderContextManager {
 
     pub fn glow_context(&self) -> Arc<glow::Context> {
         self.window_ctx.glow_gl_api()
+    }
+
+    pub fn prepare_window_for_rendering(&self) {
+        if let Err(e) = self.window_ctx.make_current() {
+            eprintln!("prepare_window_for_rendering: make_current failed: {e:?}");
+        }
+        self.window_ctx.prepare_for_rendering();
     }
 
     pub fn present(&self) {

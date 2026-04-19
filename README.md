@@ -1,8 +1,8 @@
-# Orthogonal
+# Hodei
 
 A keyboard-first, tiling web browser built in Rust.
 
-Orthogonal splits the window into a dynamic Binary Space Partitioning (BSP) tree of web views, driven entirely by the keyboard. It embeds the [Servo](https://servo.org) web engine and renders tiles with an OpenGL compositor, overlaying a lightweight Slint-powered HUD for mode, URL, commands, and hint labels.
+Hodei splits the window into a dynamic Binary Space Partitioning (BSP) tree of web views, driven entirely by the keyboard. It embeds the [Servo](https://servo.org) web engine and renders tiles with an OpenGL compositor, overlaying a lightweight Slint-powered HUD for mode, URL, commands, and hint labels.
 
 > **Version:** 0.1.0
 
@@ -24,9 +24,9 @@ Orthogonal splits the window into a dynamic Binary Space Partitioning (BSP) tree
 ```
 .
 ├── crates/
-│   ├── orthogonal-core/      # BSP layout, input routing, HUD bridge, compositor, session persistence
-│   ├── orthogonal-app/       # Winit application loop and integration glue
-│   └── orthogonal-servo/     # Servo engine facade (excluded from root workspace)
+│   ├── hodei-core/      # BSP layout, input routing, HUD bridge, compositor, session persistence
+│   ├── hodei-app/       # Winit application loop and integration glue
+│   └── hodei-servo/     # Servo engine facade (excluded from root workspace)
 ├── servo/                    # Servo git submodule
 ├── ladybird/                 # Ladybird git submodule
 ├── ui/
@@ -60,17 +60,17 @@ cargo build --workspace
 
 ### 2. Build the Servo facade
 
-`orthogonal-servo` is excluded from the root workspace because Servo's internal `Cargo.toml` uses `workspace.package` inheritance that conflicts when loaded as a path dependency inside another workspace.
+`hodei-servo` is excluded from the root workspace because Servo's internal `Cargo.toml` uses `workspace.package` inheritance that conflicts when loaded as a path dependency inside another workspace.
 
 ```bash
-cd crates/orthogonal-servo
+cd crates/hodei-servo
 cargo build
 ```
 
 Or from the project root:
 
 ```bash
-cargo build --manifest-path crates/orthogonal-servo/Cargo.toml
+cargo build --manifest-path crates/hodei-servo/Cargo.toml
 ```
 
 ---
@@ -86,7 +86,7 @@ cargo test --workspace
 Run tests for the Servo facade:
 
 ```bash
-cargo test --manifest-path crates/orthogonal-servo/Cargo.toml
+cargo test --manifest-path crates/hodei-servo/Cargo.toml
 ```
 
 ---
@@ -96,10 +96,10 @@ cargo test --manifest-path crates/orthogonal-servo/Cargo.toml
 Launch the browser:
 
 ```bash
-cargo run -p orthogonal-app
+cargo run -p hodei-app
 ```
 
-On first launch, Orthogonal opens a 1280×720 window and navigates the first tile to `https://servo.org`.
+On first launch, Hodei opens a 1280×720 window and navigates the first tile to `https://servo.org`.
 
 ---
 
@@ -124,18 +124,18 @@ On first launch, Orthogonal opens a 1280×720 window and navigates the first til
 
 ## Architecture Overview
 
-1. **Winit Event Loop** (`orthogonal-app`) drives the application lifecycle.
-2. **Input Router** (`orthogonal-core`) translates keyboard events into `Action`s.
-3. **BSP Layout** (`orthogonal-core`) manages tile geometry and focus.
-4. **Servo Facade** (`orthogonal-servo`) creates one `WebView` + `OffscreenRenderingContext` per tile.
-5. **Compositor** (`orthogonal-core`) reads each tile's FBO into a GL texture and draws quads for each tile, then alpha-blends the HUD on top.
-6. **HUD** (`orthogonal-core`) renders `hud.slint` with a software renderer to an RGBA buffer uploaded as a texture.
+1. **Winit Event Loop** (`hodei-app`) drives the application lifecycle.
+2. **Input Router** (`hodei-core`) translates keyboard events into `Action`s.
+3. **BSP Layout** (`hodei-core`) manages tile geometry and focus.
+4. **Servo Facade** (`hodei-servo`) creates one `WebView` + `OffscreenRenderingContext` per tile.
+5. **Compositor** (`hodei-core`) reads each tile's FBO into a GL texture and draws quads for each tile, then alpha-blends the HUD on top.
+6. **HUD** (`hodei-core`) renders `hud.slint` with a software renderer to an RGBA buffer uploaded as a texture.
 
 ---
 
 ## Notes
 
-- `orthogonal-core` uses `rusqlite 0.37` to match Servo's `storage` crate and avoid `libsqlite3-sys` linking conflicts.
+- `hodei-core` uses `rusqlite 0.37` to match Servo's `storage` crate and avoid `libsqlite3-sys` linking conflicts.
 - The `servo/` and `ladybird/` directories are shallow-cloned git submodules.
 - A benign GL texture warning may appear on first launch; the application continues to run correctly.
 

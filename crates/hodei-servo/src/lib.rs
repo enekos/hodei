@@ -7,14 +7,14 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc;
 
-use orthogonal_core::types::*;
+use hodei_core::types::*;
 use servo::RenderingContext;
 use url::Url;
 
 pub use context::RenderContextManager;
-pub use delegate::{OrthoServoDelegate, OrthoWebViewDelegate};
+pub use delegate::{HodeiServoDelegate, HodeiWebViewDelegate};
 
-// Re-export types needed by orthogonal-app without depending on servo directly.
+// Re-export types needed by hodei-app without depending on servo directly.
 pub use servo::EventLoopWaker as ServoEventLoopWaker;
 
 /// The Servo engine facade. Wraps all Servo interactions.
@@ -45,7 +45,7 @@ impl Engine {
             .event_loop_waker(waker)
             .build();
 
-        let delegate = Rc::new(OrthoServoDelegate);
+        let delegate = Rc::new(HodeiServoDelegate);
         servo.set_delegate(delegate);
 
         let (metadata_tx, metadata_rx) = mpsc::channel();
@@ -64,7 +64,7 @@ impl Engine {
         let url = Url::parse(url_str).unwrap_or_else(|_| {
             Url::parse(&format!("https://{}", url_str)).expect("invalid URL")
         });
-        let delegate = Rc::new(OrthoWebViewDelegate::new(view_id, self.metadata_tx.clone()));
+        let delegate = Rc::new(HodeiWebViewDelegate::new(view_id, self.metadata_tx.clone()));
         let webview = servo::WebViewBuilder::new(&self.servo, offscreen_ctx.clone())
             .url(url)
             .delegate(delegate)
@@ -124,6 +124,30 @@ impl Engine {
         }
     }
 
+    pub fn hard_reload(&self, view_id: ViewId) {
+        if let Some(handle) = self.tiles.get(&view_id) {
+            // Servo reload() doesn't have a cache-bypass flag exposed publicly.
+            // Use JS location.reload(true) as a fallback.
+            handle.webview.evaluate_javascript(
+                "window.location.reload(true)".to_string(),
+                Box::new(|_| {}),
+            );
+        }
+    }
+
+    pub fn set_page_zoom(&self, view_id: ViewId, zoom: f32) {
+        if let Some(handle) = self.tiles.get(&view_id) {
+            handle.webview.set_page_zoom(zoom);
+        }
+    }
+
+    pub fn set_theme(&self, dark: bool) {
+        let theme = if dark { servo::Theme::Dark } else { servo::Theme::Light };
+        for handle in self.tiles.values() {
+            handle.webview.notify_theme_change(theme);
+        }
+    }
+
     pub fn send_input(&self, view_id: ViewId, event: CoreKeyEvent) {
         if let Some(handle) = self.tiles.get(&view_id) {
             let servo_event = events::core_key_to_servo(&event);
@@ -178,6 +202,12 @@ impl Engine {
 
     pub fn gl_context(&self) -> Arc<glow::Context> {
         self.ctx_manager.glow_context()
+    }
+
+    /// Make the window GL context current and bind surfman's window FBO so compositor
+    /// draws go to the correct window surface.
+    pub fn prepare_window_for_rendering(&self) {
+        self.ctx_manager.prepare_window_for_rendering();
     }
 
     pub fn present(&self) {

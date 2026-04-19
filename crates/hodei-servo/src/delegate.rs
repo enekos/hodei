@@ -1,30 +1,30 @@
-use orthogonal_core::types::{ViewId, MetadataEvent};
+use hodei_core::types::{ViewId, MetadataEvent};
 use std::sync::mpsc::Sender;
 
 /// Engine-level delegate.
-pub struct OrthoServoDelegate;
+pub struct HodeiServoDelegate;
 
-impl servo::ServoDelegate for OrthoServoDelegate {
+impl servo::ServoDelegate for HodeiServoDelegate {
     fn notify_error(&self, error: servo::ServoError) {
         log::error!("Servo error: {:?}", error);
     }
 }
 
 /// Per-WebView delegate. Routes events back to the app via channel.
-pub struct OrthoWebViewDelegate {
+pub struct HodeiWebViewDelegate {
     pub view_id: ViewId,
     pub metadata_tx: Sender<MetadataEvent>,
 }
 
-impl OrthoWebViewDelegate {
+impl HodeiWebViewDelegate {
     pub fn new(view_id: ViewId, metadata_tx: Sender<MetadataEvent>) -> Self {
         Self { view_id, metadata_tx }
     }
 }
 
-impl servo::WebViewDelegate for OrthoWebViewDelegate {
+impl servo::WebViewDelegate for HodeiWebViewDelegate {
     fn notify_new_frame_ready(&self, _webview: servo::WebView) {
-        log::trace!("New frame ready for {:?}", self.view_id);
+        let _ = self.metadata_tx.send(MetadataEvent::FrameReady { view_id: self.view_id });
     }
 
     fn notify_url_changed(&self, _webview: servo::WebView, url: url::Url) {
@@ -43,5 +43,12 @@ impl servo::WebViewDelegate for OrthoWebViewDelegate {
                 title,
             });
         }
+    }
+
+    fn notify_status_text_changed(&self, _webview: servo::WebView, status: Option<String>) {
+        let _ = self.metadata_tx.send(MetadataEvent::StatusTextChanged {
+            view_id: self.view_id,
+            text: status,
+        });
     }
 }
