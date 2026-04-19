@@ -6,6 +6,7 @@ pub struct View {
     pub url: String,
     pub title: String,
     pub dirty: bool,
+    pub project_override: Option<String>,
 }
 
 pub struct ViewManager {
@@ -33,6 +34,7 @@ impl ViewManager {
             url: url.to_string(),
             title: String::new(),
             dirty: true,
+            project_override: None,
         });
         id
     }
@@ -43,6 +45,7 @@ impl ViewManager {
             url: url.to_string(),
             title: String::new(),
             dirty: true,
+            project_override: None,
         });
         if id.0 >= self.next_id {
             self.next_id = id.0 + 1;
@@ -84,6 +87,13 @@ impl ViewManager {
     pub fn count(&self) -> usize {
         self.views.len()
     }
+}
+
+pub fn effective_project<'a>(view: Option<&'a View>, workspace_project: Option<&'a str>) -> Option<&'a str> {
+    if let Some(v) = view {
+        if let Some(p) = v.project_override.as_deref() { return Some(p); }
+    }
+    workspace_project
 }
 
 #[cfg(test)]
@@ -140,5 +150,30 @@ mod tests {
         assert!(vm.dirty_views().is_empty());
         vm.mark_dirty(id);
         assert!(vm.dirty_views().contains(&id));
+    }
+
+    #[test]
+    fn effective_project_prefers_override() {
+        let mut vm = ViewManager::new();
+        let id = vm.create("https://x.com");
+        vm.get_mut(id).unwrap().project_override = Some("override".into());
+        let v = vm.get(id);
+        assert_eq!(effective_project(v, Some("workspace")), Some("override"));
+    }
+
+    #[test]
+    fn effective_project_falls_back_to_workspace() {
+        let mut vm = ViewManager::new();
+        let id = vm.create("https://x.com");
+        let v = vm.get(id);
+        assert_eq!(effective_project(v, Some("workspace")), Some("workspace"));
+    }
+
+    #[test]
+    fn effective_project_none_when_neither_set() {
+        let mut vm = ViewManager::new();
+        let id = vm.create("https://x.com");
+        let v = vm.get(id);
+        assert_eq!(effective_project(v, None), None);
     }
 }
