@@ -1,26 +1,14 @@
-use std::path::Path;
+use std::rc::Rc;
 use rusqlite::{params, Connection};
 use crate::types::*;
 
-const SCHEMA: &str = include_str!("../../../migrations/001_init.sql");
-
 pub struct SessionManager {
-    db: Connection,
+    conn: Rc<Connection>,
 }
 
 impl SessionManager {
-    pub fn open(path: &Path) -> Result<Self, rusqlite::Error> {
-        let db = Connection::open(path)?;
-        db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
-        db.execute_batch(SCHEMA)?;
-        Ok(Self { db })
-    }
-
-    pub fn open_in_memory() -> Result<Self, rusqlite::Error> {
-        let db = Connection::open_in_memory()?;
-        db.execute_batch("PRAGMA foreign_keys=ON;")?;
-        db.execute_batch(SCHEMA)?;
-        Ok(Self { db })
+    pub fn new(conn: Rc<Connection>) -> Self {
+        Self { conn }
     }
 
     pub fn save(
@@ -30,7 +18,7 @@ impl SessionManager {
         tiles: &[TileRow],
         focused: Option<ViewId>,
     ) -> Result<(), rusqlite::Error> {
-        let tx = self.db.unchecked_transaction()?;
+        let tx = self.conn.unchecked_transaction()?;
 
         // Delete existing session with this name
         tx.execute("DELETE FROM sessions WHERE name = ?1", params![name])?;
@@ -74,7 +62,7 @@ impl SessionManager {
     }
 
     pub fn restore(&self, name: &str) -> Result<Option<(Vec<LayoutNodeRow>, Vec<TileRow>, Option<ViewId>)>, rusqlite::Error> {
-        let session_id: Option<i64> = self.db
+        let session_id: Option<i64> = self.conn
             .query_row(
                 "SELECT id FROM sessions WHERE name = ?1",
                 params![name],
@@ -88,7 +76,7 @@ impl SessionManager {
         };
 
         // Read tiles
-        let mut stmt = self.db.prepare(
+        let mut stmt = self.conn.prepare(
             "SELECT view_id, url, title, scroll_x, scroll_y FROM tiles WHERE session_id = ?1"
         )?;
         let tiles: Vec<TileRow> = stmt.query_map(params![session_id], |row| {
@@ -102,7 +90,7 @@ impl SessionManager {
         })?.collect::<Result<Vec<_>, _>>()?;
 
         // Read layout nodes
-        let mut stmt = self.db.prepare(
+        let mut stmt = self.conn.prepare(
             "SELECT node_index, is_leaf, direction, ratio, view_id, focused_view_id FROM layout_tree WHERE session_id = ?1 ORDER BY node_index"
         )?;
         let mut focused: Option<ViewId> = None;
@@ -138,7 +126,7 @@ impl SessionManager {
     }
 
     pub fn list(&self) -> Result<Vec<SessionInfo>, rusqlite::Error> {
-        let mut stmt = self.db.prepare(
+        let mut stmt = self.conn.prepare(
             "SELECT s.id, s.name, s.created_at, s.updated_at, COUNT(t.id) \
              FROM sessions s LEFT JOIN tiles t ON t.session_id = s.id \
              GROUP BY s.id ORDER BY s.updated_at DESC"
@@ -156,7 +144,7 @@ impl SessionManager {
     }
 
     pub fn delete(&self, name: &str) -> Result<(), rusqlite::Error> {
-        self.db.execute("DELETE FROM sessions WHERE name = ?1", params![name])?;
+        self.conn.execute("DELETE FROM sessions WHERE name = ?1", params![name])?;
         Ok(())
     }
 }
@@ -164,6 +152,12 @@ impl SessionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db;
+
+    fn make_session_manager() -> SessionManager {
+        let conn = db::open_database_in_memory().unwrap();
+        SessionManager::new(conn)
+    }
 
     fn sample_tiles() -> Vec<TileRow> {
         vec![
@@ -212,9 +206,9 @@ mod tests {
 
     #[test]
     fn open_creates_tables() {
-        let sm = SessionManager::open_in_memory().unwrap();
+        let sm = make_session_manager();
         // Should not panic — tables exist
-        let count: i64 = sm.db
+        let count: i64 = sm.conn
             .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 0);
@@ -222,7 +216,7 @@ mod tests {
 
     #[test]
     fn save_and_restore_roundtrip() {
-        let sm = SessionManager::open_in_memory().unwrap();
+        let sm = make_session_manager();
         let tiles = sample_tiles();
         let nodes = sample_nodes();
         sm.save("test", &nodes, &tiles, Some(ViewId(1))).unwrap();
@@ -237,13 +231,13 @@ mod tests {
 
     #[test]
     fn restore_nonexistent_returns_none() {
-        let sm = SessionManager::open_in_memory().unwrap();
+        let sm = make_session_manager();
         assert!(sm.restore("nope").unwrap().is_none());
     }
 
     #[test]
     fn autosave_overwrites_default() {
-        let sm = SessionManager::open_in_memory().unwrap();
+        let sm = make_session_manager();
         let tiles1 = vec![TileRow {
             view_id: ViewId(1),
             url: "https://a.com".into(),
@@ -278,7 +272,7 @@ mod tests {
 
     #[test]
     fn list_sessions() {
-        let sm = SessionManager::open_in_memory().unwrap();
+        let sm = make_session_manager();
         sm.save("alpha", &sample_nodes(), &sample_tiles(), None).unwrap();
         sm.save("beta", &[], &[], None).unwrap();
         let list = sm.list().unwrap();
@@ -287,7 +281,7 @@ mod tests {
 
     #[test]
     fn delete_session() {
-        let sm = SessionManager::open_in_memory().unwrap();
+        let sm = make_session_manager();
         sm.save("doomed", &sample_nodes(), &sample_tiles(), None).unwrap();
         sm.delete("doomed").unwrap();
         assert!(sm.restore("doomed").unwrap().is_none());

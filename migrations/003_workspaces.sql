@@ -1,0 +1,2 @@
+ALTER TABLE sessions ADD COLUMN is_active INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sessions ADD COLUMN last_accessed_at TEXT;

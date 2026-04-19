@@ -82,27 +82,11 @@ impl BspLayout {
         self.root.is_none()
     }
 
-    /// Counter for generating new ViewIds within the layout.
-    /// In production, ViewManager provides IDs; this is a fallback.
-    fn next_split_id(&self) -> ViewId {
-        // Walk the tree to find the max ViewId, then +1
-        fn max_id(node: &Node) -> u64 {
-            match node {
-                Node::Leaf { view_id } => view_id.0,
-                Node::Branch { first, second, .. } => max_id(first).max(max_id(second)),
-            }
-        }
-        let max = self.root.as_ref().map(|r| max_id(r)).unwrap_or(0);
-        ViewId(max + 1)
-    }
-
-    pub fn split(&mut self, target: ViewId, dir: SplitDirection) -> ViewId {
-        let new_id = self.next_split_id();
+    pub fn split(&mut self, target: ViewId, dir: SplitDirection, new_id: ViewId) {
         if let Some(ref mut root) = self.root {
             Self::split_node(root, target, dir, new_id);
         }
         self.focused = Some(new_id);
-        new_id
     }
 
     fn split_node(node: &mut Node, target: ViewId, dir: SplitDirection, new_id: ViewId) -> bool {
@@ -249,6 +233,73 @@ impl BspLayout {
         }
     }
 
+    pub fn reset_splits(&mut self) {
+        if let Some(ref mut root) = self.root {
+            Self::reset_node(root);
+        }
+    }
+
+    fn reset_node(node: &mut Node) {
+        match node {
+            Node::Branch { ratio, first, second, .. } => {
+                *ratio = 0.5;
+                Self::reset_node(first);
+                Self::reset_node(second);
+            }
+            _ => {}
+        }
+    }
+
+    pub fn swap_tiles(&mut self, a: ViewId, b: ViewId) {
+        if let Some(ref mut root) = self.root {
+            Self::swap_node(root, a, b);
+        }
+    }
+
+    fn swap_node(node: &mut Node, a: ViewId, b: ViewId) {
+        match node {
+            Node::Leaf { view_id } => {
+                if *view_id == a {
+                    *view_id = b;
+                } else if *view_id == b {
+                    *view_id = a;
+                }
+            }
+            Node::Branch { first, second, .. } => {
+                Self::swap_node(first, a, b);
+                Self::swap_node(second, a, b);
+            }
+        }
+    }
+
+    pub fn next_focus(&self, current: ViewId) -> Option<ViewId> {
+        let resolved = self.resolve();
+        let positions: Vec<ViewId> = resolved.into_iter().map(|(id, _)| id).collect();
+        if positions.is_empty() {
+            return None;
+        }
+        if let Some(idx) = positions.iter().position(|&id| id == current) {
+            let next_idx = (idx + 1) % positions.len();
+            Some(positions[next_idx])
+        } else {
+            positions.first().copied()
+        }
+    }
+
+    pub fn prev_focus(&self, current: ViewId) -> Option<ViewId> {
+        let resolved = self.resolve();
+        let positions: Vec<ViewId> = resolved.into_iter().map(|(id, _)| id).collect();
+        if positions.is_empty() {
+            return None;
+        }
+        if let Some(idx) = positions.iter().position(|&id| id == current) {
+            let prev_idx = if idx == 0 { positions.len() - 1 } else { idx - 1 };
+            Some(positions[prev_idx])
+        } else {
+            positions.first().copied()
+        }
+    }
+
     /// Serialize to BFS-order node rows for SQLite storage.
     pub fn serialize(&self) -> (Vec<LayoutNodeRow>, Option<ViewId>) {
         let mut rows = Vec::new();
@@ -343,14 +394,14 @@ mod tests {
     fn split_vertical_creates_two_tiles() {
         let mut layout = BspLayout::new(vp());
         layout.add_first_view(ViewId(1));
-        let new_id = layout.split(ViewId(1), SplitDirection::Vertical);
+        layout.split(ViewId(1), SplitDirection::Vertical, ViewId(2));
         let resolved = layout.resolve();
         assert_eq!(resolved.len(), 2);
         // First child: left half
         assert_eq!(resolved[0].0, ViewId(1));
         assert_eq!(resolved[0].1, Rect::new(0.0, 0.0, 400.0, 600.0));
         // Second child: right half
-        assert_eq!(resolved[1].0, new_id);
+        assert_eq!(resolved[1].0, ViewId(2));
         assert_eq!(resolved[1].1, Rect::new(400.0, 0.0, 400.0, 600.0));
     }
 
@@ -358,7 +409,7 @@ mod tests {
     fn split_horizontal_creates_top_bottom() {
         let mut layout = BspLayout::new(vp());
         layout.add_first_view(ViewId(1));
-        let new_id = layout.split(ViewId(1), SplitDirection::Horizontal);
+        layout.split(ViewId(1), SplitDirection::Horizontal, ViewId(2));
         let resolved = layout.resolve();
         assert_eq!(resolved.len(), 2);
         assert_eq!(resolved[0].1, Rect::new(0.0, 0.0, 800.0, 300.0));
@@ -369,8 +420,8 @@ mod tests {
     fn nested_split() {
         let mut layout = BspLayout::new(vp());
         layout.add_first_view(ViewId(1));
-        let v2 = layout.split(ViewId(1), SplitDirection::Vertical);
-        let _v3 = layout.split(v2, SplitDirection::Horizontal);
+        layout.split(ViewId(1), SplitDirection::Vertical, ViewId(2));
+        layout.split(ViewId(2), SplitDirection::Horizontal, ViewId(3));
         let resolved = layout.resolve();
         assert_eq!(resolved.len(), 3);
         // Left half unchanged
@@ -393,8 +444,8 @@ mod tests {
     fn close_promotes_sibling() {
         let mut layout = BspLayout::new(vp());
         layout.add_first_view(ViewId(1));
-        let v2 = layout.split(ViewId(1), SplitDirection::Vertical);
-        layout.close(v2);
+        layout.split(ViewId(1), SplitDirection::Vertical, ViewId(2));
+        layout.close(ViewId(2));
         let resolved = layout.resolve();
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].0, ViewId(1));
@@ -405,14 +456,14 @@ mod tests {
     fn close_in_nested_tree() {
         let mut layout = BspLayout::new(vp());
         layout.add_first_view(ViewId(1));
-        let v2 = layout.split(ViewId(1), SplitDirection::Vertical);
-        let _v3 = layout.split(v2, SplitDirection::Horizontal);
+        layout.split(ViewId(1), SplitDirection::Vertical, ViewId(2));
+        layout.split(ViewId(2), SplitDirection::Horizontal, ViewId(3));
         // Close v2 (top-right) — its sibling v3 (bottom-right) takes the right half
-        layout.close(v2);
+        layout.close(ViewId(2));
         let resolved = layout.resolve();
         assert_eq!(resolved.len(), 2);
         assert_eq!(resolved[0].0, ViewId(1)); // left
-        // _v3 takes over the right half
+        // ViewId(3) takes over the right half
         assert_eq!(resolved[1].1, Rect::new(400.0, 0.0, 400.0, 600.0));
     }
 
@@ -420,11 +471,11 @@ mod tests {
     fn focus_neighbor_vertical_split() {
         let mut layout = BspLayout::new(vp());
         layout.add_first_view(ViewId(1));
-        let v2 = layout.split(ViewId(1), SplitDirection::Vertical);
+        layout.split(ViewId(1), SplitDirection::Vertical, ViewId(2));
         // From left (v1), go right → v2
-        assert_eq!(layout.focus_neighbor(ViewId(1), Direction::Right), Some(v2));
+        assert_eq!(layout.focus_neighbor(ViewId(1), Direction::Right), Some(ViewId(2)));
         // From right (v2), go left → v1
-        assert_eq!(layout.focus_neighbor(v2, Direction::Left), Some(ViewId(1)));
+        assert_eq!(layout.focus_neighbor(ViewId(2), Direction::Left), Some(ViewId(1)));
         // From left (v1), go left → None (no neighbor)
         assert_eq!(layout.focus_neighbor(ViewId(1), Direction::Left), None);
     }
@@ -433,9 +484,9 @@ mod tests {
     fn focus_neighbor_horizontal_split() {
         let mut layout = BspLayout::new(vp());
         layout.add_first_view(ViewId(1));
-        let v2 = layout.split(ViewId(1), SplitDirection::Horizontal);
-        assert_eq!(layout.focus_neighbor(ViewId(1), Direction::Down), Some(v2));
-        assert_eq!(layout.focus_neighbor(v2, Direction::Up), Some(ViewId(1)));
+        layout.split(ViewId(1), SplitDirection::Horizontal, ViewId(2));
+        assert_eq!(layout.focus_neighbor(ViewId(1), Direction::Down), Some(ViewId(2)));
+        assert_eq!(layout.focus_neighbor(ViewId(2), Direction::Up), Some(ViewId(1)));
         assert_eq!(layout.focus_neighbor(ViewId(1), Direction::Up), None);
     }
 
@@ -443,7 +494,7 @@ mod tests {
     fn resize_split_adjusts_ratio() {
         let mut layout = BspLayout::new(vp());
         layout.add_first_view(ViewId(1));
-        let v2 = layout.split(ViewId(1), SplitDirection::Vertical);
+        layout.split(ViewId(1), SplitDirection::Vertical, ViewId(2));
         layout.resize_split(ViewId(1), 0.1); // increase left side
         let resolved = layout.resolve();
         // Left should be 60% (0.5 + 0.1)
@@ -455,7 +506,7 @@ mod tests {
     fn resize_split_clamps_ratio() {
         let mut layout = BspLayout::new(vp());
         layout.add_first_view(ViewId(1));
-        let _ = layout.split(ViewId(1), SplitDirection::Vertical);
+        layout.split(ViewId(1), SplitDirection::Vertical, ViewId(2));
         layout.resize_split(ViewId(1), 1.0); // try to push way past limit
         let resolved = layout.resolve();
         let left_width = resolved[0].1.width;
@@ -467,13 +518,53 @@ mod tests {
     fn serialize_deserialize_roundtrip() {
         let mut layout = BspLayout::new(vp());
         layout.add_first_view(ViewId(1));
-        let v2 = layout.split(ViewId(1), SplitDirection::Vertical);
-        let _v3 = layout.split(v2, SplitDirection::Horizontal);
+        layout.split(ViewId(1), SplitDirection::Vertical, ViewId(2));
+        layout.split(ViewId(2), SplitDirection::Horizontal, ViewId(3));
         layout.set_focused(ViewId(1));
 
         let (nodes, focused) = layout.serialize();
         let restored = BspLayout::deserialize(vp(), &nodes, focused);
         assert_eq!(layout.resolve(), restored.resolve());
         assert_eq!(restored.focused(), Some(ViewId(1)));
+    }
+
+    #[test]
+    fn reset_splits_equalizes() {
+        let mut layout = BspLayout::new(vp());
+        layout.add_first_view(ViewId(1));
+        layout.split(ViewId(1), SplitDirection::Vertical, ViewId(2));
+        layout.resize_split(ViewId(1), 0.2);
+        layout.reset_splits();
+        let resolved = layout.resolve();
+        assert!((resolved[0].1.width - 400.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn swap_tiles_exchanges_ids() {
+        let mut layout = BspLayout::new(vp());
+        layout.add_first_view(ViewId(1));
+        layout.split(ViewId(1), SplitDirection::Vertical, ViewId(2));
+        layout.swap_tiles(ViewId(1), ViewId(2));
+        let resolved = layout.resolve();
+        assert_eq!(resolved[0].0, ViewId(2));
+        assert_eq!(resolved[1].0, ViewId(1));
+    }
+
+    #[test]
+    fn next_focus_cycles() {
+        let mut layout = BspLayout::new(vp());
+        layout.add_first_view(ViewId(1));
+        layout.split(ViewId(1), SplitDirection::Vertical, ViewId(2));
+        assert_eq!(layout.next_focus(ViewId(1)), Some(ViewId(2)));
+        assert_eq!(layout.next_focus(ViewId(2)), Some(ViewId(1)));
+    }
+
+    #[test]
+    fn prev_focus_cycles() {
+        let mut layout = BspLayout::new(vp());
+        layout.add_first_view(ViewId(1));
+        layout.split(ViewId(1), SplitDirection::Vertical, ViewId(2));
+        assert_eq!(layout.prev_focus(ViewId(2)), Some(ViewId(1)));
+        assert_eq!(layout.prev_focus(ViewId(1)), Some(ViewId(2)));
     }
 }

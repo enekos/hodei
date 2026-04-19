@@ -1,10 +1,10 @@
 [package]
-name = "orthogonal-servo"
+name = "hodei-servo"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-orthogonal-core = { path = "../orthogonal-core" }
+hodei-core = { path = "../hodei-core" }
 servo = { path = "../../servo/components/servo" }
 url = "2"
 log = "0.4"
@@ -12,5 +12,6 @@ image = "0.25"
 glow = "0.17"
 raw-window-handle = "0.6"
 dpi = "0.1"
+euclid = "0.22"
 
 [workspace]

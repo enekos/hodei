@@ -1,0 +1,20 @@
+[package]
+name = "hodei-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+hodei-core = { path = "../hodei-core" }
+hodei-servo = { path = "../hodei-servo" }
+winit = "0.30"
+log = "0.4"
+env_logger = "0.11"
+image = "0.25"
+glow = "0.17"
+dirs = "6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+euclid = "0.22"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync"] }
+axum = { version = "0.8", features = ["ws"] }

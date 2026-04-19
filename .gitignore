@@ -1,7 +1,7 @@
 # Rust
 target/
 /target/
-crates/orthogonal-servo/target/
+crates/hodei-servo/target/
 
 # SQLite databases
 *.db
@@ -35,3 +35,6 @@ Thumbs.db
 *.bak
 *.orig
 *.rej
+
+# Git worktrees (subagent-driven development)
+.worktrees/

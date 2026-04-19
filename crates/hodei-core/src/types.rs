@@ -62,7 +62,7 @@ pub struct Modifiers {
     pub meta: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CoreKey {
     Char(char),
     Escape,
@@ -73,6 +73,10 @@ pub enum CoreKey {
     Right,
     Up,
     Down,
+    Home,
+    End,
+    PageUp,
+    PageDown,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -150,6 +154,18 @@ pub struct TileRow {
     pub title: String,
     pub scroll_x: f64,
     pub scroll_y: f64,
+}
+
+// === Metadata events (from Servo delegate back to app) ===
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MetadataEvent {
+    UrlChanged { view_id: ViewId, url: String },
+    TitleChanged { view_id: ViewId, title: String },
+    StatusTextChanged { view_id: ViewId, text: Option<String> },
+    FrameReady { view_id: ViewId },
+    DevToolsStarted { port: u16, token: String },
+    DevToolsConnectionRequest,
 }
 
 #[cfg(test)]

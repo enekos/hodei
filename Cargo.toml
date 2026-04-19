@@ -1,7 +1,7 @@
 [workspace]
-members = ["crates/orthogonal-core", "crates/orthogonal-app"]
+members = ["crates/hodei-core", "crates/hodei-app"]
 resolver = "2"
-exclude = ["crates/orthogonal-servo", "servo", "ladybird"]
+exclude = ["crates/hodei-servo", "servo", "ladybird"]
 
 [workspace.dependencies]
 log = "0.4"

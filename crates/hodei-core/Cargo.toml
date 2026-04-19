@@ -1,5 +1,5 @@
 [package]
-name = "orthogonal-core"
+name = "hodei-core"
 version = "0.1.0"
 edition = "2021"
 
@@ -9,8 +9,10 @@ slint = "1"
 glow = "0.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "0.8"
 dirs = "6"
 log = { workspace = true }
+image = "0.25"
 
 [build-dependencies]
 slint-build = "1"

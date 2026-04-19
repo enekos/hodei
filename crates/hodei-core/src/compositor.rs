@@ -1,17 +1,15 @@
 use glow::HasContext;
-use crate::types::Rect;
 
+// Full-window textured quad. Used to draw the HUD RGBA buffer over the
+// already-blitted tile content in the window framebuffer.
 const VERTEX_SHADER: &str = r#"#version 330 core
 layout(location = 0) in vec2 a_pos;
 layout(location = 1) in vec2 a_uv;
-uniform vec4 u_rect; // (x, y, w, h) in 0..1 window coords
 out vec2 v_uv;
 void main() {
-    vec2 pos = a_pos * 0.5 + 0.5;
-    pos = u_rect.xy + pos * u_rect.zw;
-    pos = pos * 2.0 - 1.0;
-    gl_Position = vec4(pos, 0.0, 1.0);
-    v_uv = a_uv;
+    gl_Position = vec4(a_pos, 0.0, 1.0);
+    // Slint writes its buffer top-down; GL sampling wants bottom-up.
+    v_uv = vec2(a_uv.x, 1.0 - a_uv.y);
 }
 "#;
 
@@ -28,8 +26,6 @@ pub struct Compositor {
     program: glow::Program,
     quad_vao: glow::VertexArray,
     hud_texture: glow::Texture,
-    rect_loc: Option<glow::UniformLocation>,
-    tex_loc: Option<glow::UniformLocation>,
     window_width: u32,
     window_height: u32,
 }
@@ -41,57 +37,46 @@ impl Compositor {
         let program = Self::create_program(gl);
         let quad_vao = Self::create_quad_vao(gl);
         let hud_texture = Self::create_empty_texture(gl, width as i32, height as i32);
-        let rect_loc = gl.get_uniform_location(program, "u_rect");
-        let tex_loc = gl.get_uniform_location(program, "u_texture");
+
+        // Reset to defaults so we hand back a clean context.
+        gl.bind_vertex_array(None);
+        gl.bind_texture(glow::TEXTURE_2D, None);
+        gl.use_program(None);
 
         Self {
             program,
             quad_vao,
             hud_texture,
-            rect_loc,
-            tex_loc,
             window_width: width,
             window_height: height,
         }
     }
 
-    /// Draw all tiles and the HUD overlay.
+    /// Draw the HUD overlay on top of whatever is already in the bound framebuffer.
+    ///
+    /// Tiles must be blitted into the window framebuffer before calling this.
     ///
     /// # Safety
-    /// Must be called with a valid, current GL context.
-    pub unsafe fn draw(
-        &self,
-        gl: &glow::Context,
-        tiles: &[(Rect, glow::Texture)],
-        hud_buffer: &[u8],
-    ) {
+    /// Must be called with a valid, current GL context and the window FBO bound.
+    pub unsafe fn draw_hud(&self, gl: &glow::Context, hud_buffer: &[u8]) {
+        debug_assert_eq!(
+            hud_buffer.len(),
+            (self.window_width * self.window_height * 4) as usize,
+            "HUD buffer size mismatch"
+        );
+
+        // Reset GL state that Servo's renderer may have left on.
+        gl.disable(glow::DEPTH_TEST);
+        gl.disable(glow::STENCIL_TEST);
+        gl.disable(glow::SCISSOR_TEST);
+        gl.disable(glow::CULL_FACE);
+        gl.depth_mask(false);
+        gl.color_mask(true, true, true, true);
+
         gl.viewport(0, 0, self.window_width as i32, self.window_height as i32);
-        gl.clear_color(0.05, 0.05, 0.1, 1.0);
-        gl.clear(glow::COLOR_BUFFER_BIT);
 
         gl.use_program(Some(self.program));
-        gl.uniform_1_i32(self.tex_loc.as_ref(), 0);
         gl.active_texture(glow::TEXTURE0);
-        gl.bind_vertex_array(Some(self.quad_vao));
-
-        // Draw each tile
-        gl.disable(glow::BLEND);
-        let wf = self.window_width as f32;
-        let hf = self.window_height as f32;
-        for (rect, texture) in tiles {
-            let norm_x = rect.x / wf;
-            let norm_y = rect.y / hf;
-            let norm_w = rect.width / wf;
-            let norm_h = rect.height / hf;
-            gl.uniform_4_f32(self.rect_loc.as_ref(), norm_x, norm_y, norm_w, norm_h);
-            gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
-            gl.draw_arrays(glow::TRIANGLES, 0, 6);
-        }
-
-        // Draw HUD overlay with alpha blending
-        gl.enable(glow::BLEND);
-        gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
-
         gl.bind_texture(glow::TEXTURE_2D, Some(self.hud_texture));
         gl.tex_sub_image_2d(
             glow::TEXTURE_2D,
@@ -104,11 +89,18 @@ impl Compositor {
             glow::UNSIGNED_BYTE,
             glow::PixelUnpackData::Slice(Some(hud_buffer)),
         );
-        gl.uniform_4_f32(self.rect_loc.as_ref(), 0.0, 0.0, 1.0, 1.0);
+
+        // Slint outputs premultiplied-alpha RGBA.
+        gl.enable(glow::BLEND);
+        gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
+
+        gl.bind_vertex_array(Some(self.quad_vao));
         gl.draw_arrays(glow::TRIANGLES, 0, 6);
 
-        gl.disable(glow::BLEND);
         gl.bind_vertex_array(None);
+        gl.disable(glow::BLEND);
+        gl.bind_texture(glow::TEXTURE_2D, None);
+        gl.use_program(None);
     }
 
     /// # Safety
@@ -146,6 +138,12 @@ impl Compositor {
         for s in compiled {
             gl.delete_shader(s);
         }
+        // Bind the sampler once: the shader always uses TEXTURE0.
+        gl.use_program(Some(program));
+        if let Some(loc) = gl.get_uniform_location(program, "u_texture") {
+            gl.uniform_1_i32(Some(&loc), 0);
+        }
+        gl.use_program(None);
         program
     }
 
@@ -189,6 +187,9 @@ impl Compositor {
         );
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+        gl.bind_texture(glow::TEXTURE_2D, None);
         texture
     }
 }

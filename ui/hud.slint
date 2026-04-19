@@ -5,6 +5,12 @@ export struct HintLabel {
     active: bool,
 }
 
+export struct SuggestionItem {
+    title: string,
+    url: string,
+    selected: bool,
+}
+
 export component HudWindow inherits Window {
     background: transparent;
 
@@ -16,6 +22,13 @@ export component HudWindow inherits Window {
     in property <int> tile-count: 1;
     in property <int> focused-index: 0;
     in property <[HintLabel]> hints: [];
+    in property <[SuggestionItem]> suggestions: [];
+    in property <bool> suggestions-visible: false;
+    in property <string> search-text: "";
+    in property <bool> search-visible: false;
+    in property <string> search-info: "";
+    in property <string> status-text: "";
+    in property <bool> shortcuts-visible: false;
 
     // Status bar at bottom
     Rectangle {
@@ -29,7 +42,8 @@ export component HudWindow inherits Window {
             padding-right: 8px;
 
             Text {
-                text: root.title-text != "" ? root.title-text + " \u{2014} " + root.url-text : root.url-text;
+                text: root.status-text != "" ? root.status-text :
+                      (root.title-text != "" ? root.title-text + " \u{2014} " + root.url-text : root.url-text);
                 color: #e0e0e0;
                 font-size: 12px;
                 overflow: elide;
@@ -49,7 +63,8 @@ export component HudWindow inherits Window {
                 text: root.mode-text;
                 color: root.mode-text == "NORMAL" ? #00ff88 :
                        root.mode-text == "INSERT" ? #ff8800 :
-                       root.mode-text == "HINT" ? #ff00ff : #ffff00;
+                       root.mode-text == "HINT" ? #ff00ff :
+                       root.mode-text == "SEARCH" ? #00aaff : #ffff00;
                 font-size: 12px;
                 font-weight: 700;
                 horizontal-alignment: right;
@@ -76,6 +91,72 @@ export component HudWindow inherits Window {
         }
     }
 
+    // Suggestion list (above command bar)
+    Rectangle {
+        visible: root.suggestions-visible;
+        y: parent.height - 48px - self.height;
+        width: parent.width;
+        height: min(root.suggestions.length * 24px, 240px);
+        background: #0d0d1aee;
+
+        VerticalLayout {
+            for item in root.suggestions: Rectangle {
+                height: 24px;
+                background: item.selected ? #333355 : transparent;
+
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+
+                    Text {
+                        text: item.title;
+                        color: item.selected ? white : #c0c0c0;
+                        font-size: 12px;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: item.url;
+                        color: #808080;
+                        font-size: 11px;
+                        overflow: elide;
+                        max-width: 300px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    // Search bar
+    Rectangle {
+        visible: root.search-visible;
+        y: parent.height - 48px;
+        width: parent.width;
+        height: 24px;
+        background: #0d0d1aee;
+
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+
+            Text {
+                text: "/" + root.search-text;
+                color: white;
+                font-size: 12px;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: root.search-info;
+                color: #808080;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+        }
+    }
+
     // Hint labels overlay
     for hint in root.hints: Rectangle {
         x: hint.x;
@@ -94,6 +175,117 @@ export component HudWindow inherits Window {
             font-weight: 700;
             horizontal-alignment: center;
             vertical-alignment: center;
+        }
+    }
+
+    // Keyboard shortcuts modal
+    Rectangle {
+        visible: root.shortcuts-visible;
+        width: parent.width;
+        height: parent.height;
+        background: #000000aa;
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 560px;
+            height: min(420px, parent.height - 48px);
+            background: #1a1a2eee;
+            border-radius: 6px;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+
+                Text {
+                    text: "Keyboard Shortcuts";
+                    color: #00ff88;
+                    font-size: 16px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+
+                Text {
+                    text: "Press ? or Escape to close";
+                    color: #808080;
+                    font-size: 11px;
+                    horizontal-alignment: center;
+                }
+
+                Flickable {
+                    height: parent.height - 60px;
+                    viewport-height: 800px;
+
+                    shortcuts-col := VerticalLayout {
+                        spacing: 16px;
+                        height: self.preferred-height;
+
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text { text: "Modes"; color: #ff8800; font-size: 12px; font-weight: 700; }
+                            HorizontalLayout { Text { text: "i"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Enter insert mode"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "Esc"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Return to normal mode"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: ":"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Enter command mode"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "f"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Enter hint mode"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "/"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Enter search mode"; color: #c0c0c0; font-size: 12px; } }
+                        }
+
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text { text: "Navigation"; color: #ff8800; font-size: 12px; font-weight: 700; }
+                            HorizontalLayout { Text { text: "h j k l"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Focus neighbor left/down/up/right"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "Ctrl+Tab / Ctrl+Shift+Tab"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Focus next/previous tile"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "Ctrl+b / Ctrl+f"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Back / Forward"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "r / R"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Reload / Hard reload"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "G"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Go home"; color: #c0c0c0; font-size: 12px; } }
+                        }
+
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text { text: "Tiles & Layout"; color: #ff8800; font-size: 12px; font-weight: 700; }
+                            HorizontalLayout { Text { text: "Ctrl+v / Ctrl+s"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Split vertical / horizontal"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "q"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Close view"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "H J K L"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Resize split left/down/up/right"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "="; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Reset splits"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "z"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Swap tiles"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "D"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Duplicate tile"; color: #c0c0c0; font-size: 12px; } }
+                        }
+
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text { text: "Scrolling"; color: #ff8800; font-size: 12px; font-weight: 700; }
+                            HorizontalLayout { Text { text: "Ctrl+d / Ctrl+u"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Scroll page down / up"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "Home / End"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Scroll to top / bottom"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "PageUp / PageDown"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Scroll page up / down"; color: #c0c0c0; font-size: 12px; } }
+                        }
+
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text { text: "Search & Zoom"; color: #ff8800; font-size: 12px; font-weight: 700; }
+                            HorizontalLayout { Text { text: "n / N"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Search next / previous"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "+ / -"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Zoom in / out"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "0"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Zoom reset"; color: #c0c0c0; font-size: 12px; } }
+                        }
+
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text { text: "Clipboard & Bookmarks"; color: #ff8800; font-size: 12px; font-weight: 700; }
+                            HorizontalLayout { Text { text: "y / Y"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Yank URL / title"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "p / P"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Paste navigate / new tile"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "B"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Show bookmarks"; color: #c0c0c0; font-size: 12px; } }
+                        }
+
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text { text: "Misc"; color: #ff8800; font-size: 12px; font-weight: 700; }
+                            HorizontalLayout { Text { text: "t"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Toggle theme"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "F"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "View source"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "Ctrl+0..9 / Shift+0..9"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Jump / Set quickmark"; color: #c0c0c0; font-size: 12px; } }
+                            HorizontalLayout { Text { text: "?"; color: #e0e0e0; font-size: 12px; width: 120px; } Text { text: "Show this help"; color: #c0c0c0; font-size: 12px; } }
+                        }
+                    }
+                }
+            }
         }
     }
 }

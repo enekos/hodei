@@ -1,4 +1,5 @@
 mod app;
+mod devtools_bridge;
 
 use winit::event_loop::{ControlFlow, EventLoop};
 
@@ -9,7 +10,7 @@ pub enum UserEvent {
 
 fn main() {
     env_logger::init();
-    log::info!("Starting Orthogonal v0.1.0");
+    log::info!("Starting Hodei v0.1.0");
 
     let event_loop = EventLoop::<UserEvent>::with_user_event()
         .build()

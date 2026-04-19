@@ -62,7 +62,7 @@ pub struct Hud {
 impl Hud {
     /// Must be called exactly once, before any Slint operations.
     pub fn new(width: u32, height: u32) -> Self {
-        let sw_window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
+        let sw_window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
         sw_window.set_size(slint::PhysicalSize::new(width, height));
 
         slint::platform::set_platform(Box::new(SlintPlatform {
@@ -72,6 +72,7 @@ impl Hud {
         .expect("set_platform must be called once");
 
         let hud_instance = HudWindow::new().unwrap();
+        hud_instance.show().unwrap();
         let buffer = vec![Rgba8Pixel::default(); (width * height) as usize];
 
         Self {
@@ -83,16 +84,28 @@ impl Hud {
         }
     }
 
-    /// Render the HUD to the internal RGBA buffer. Returns the buffer as bytes.
+    /// Render the HUD to the internal RGBA buffer. Returns the buffer as bytes,
+    /// with straight (non-premultiplied) RGBA. Pixels that Slint's software
+    /// renderer fills as "transparent background" come back as opaque black
+    /// (0,0,0,255); we convert those to fully transparent so the GL compositor
+    /// can blend the HUD over the page content underneath.
     pub fn render(&mut self) -> &[u8] {
-        // Clear buffer to transparent
         self.buffer.fill(Rgba8Pixel::default());
 
+        self.window.request_redraw();
         self.window.draw_if_needed(|renderer| {
             renderer.render(&mut self.buffer, self.width as usize);
         });
 
-        // Safety: Rgba8Pixel is #[repr(C)] with 4 u8 fields
+        // Work around Slint's software renderer writing opaque black where the
+        // Window background is transparent. Our HUD uses no pure-black content,
+        // so (0,0,0,255) is unambiguously "background".
+        for p in self.buffer.iter_mut() {
+            if p.r == 0 && p.g == 0 && p.b == 0 && p.a == 255 {
+                p.a = 0;
+            }
+        }
+
         unsafe {
             std::slice::from_raw_parts(
                 self.buffer.as_ptr() as *const u8,
@@ -141,6 +154,43 @@ impl Hud {
             .collect();
         let rc = Rc::new(VecModel::from(model));
         self.hud_instance.set_hints(ModelRc::from(rc));
+    }
+
+    pub fn set_suggestions(&self, suggestions: Vec<(String, String, bool)>) {
+        let model: Vec<SuggestionItem> = suggestions
+            .into_iter()
+            .map(|(title, url, selected)| SuggestionItem {
+                title: SharedString::from(title),
+                url: SharedString::from(url),
+                selected,
+            })
+            .collect();
+        let rc = Rc::new(VecModel::from(model));
+        self.hud_instance.set_suggestions(ModelRc::from(rc));
+    }
+
+    pub fn set_suggestions_visible(&self, visible: bool) {
+        self.hud_instance.set_suggestions_visible(visible);
+    }
+
+    pub fn set_search_text(&self, text: &str) {
+        self.hud_instance.set_search_text(SharedString::from(text));
+    }
+
+    pub fn set_search_visible(&self, visible: bool) {
+        self.hud_instance.set_search_visible(visible);
+    }
+
+    pub fn set_search_info(&self, info: &str) {
+        self.hud_instance.set_search_info(SharedString::from(info));
+    }
+
+    pub fn set_status_text(&self, text: &str) {
+        self.hud_instance.set_status_text(SharedString::from(text));
+    }
+
+    pub fn set_shortcuts_visible(&self, visible: bool) {
+        self.hud_instance.set_shortcuts_visible(visible);
     }
 
     pub fn clear_hints(&self) {
