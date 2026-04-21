@@ -11,6 +11,61 @@ export struct SuggestionItem {
     selected: bool,
 }
 
+// A single icon glyph from the bundled Lucide font.
+// Callers pass the unicode codepoint as the `glyph` string.
+component LucideIcon inherits Rectangle {
+    in property <string> glyph;
+    in property <color> tint: #e0e0e0;
+    in property <length> size: 16px;
+    in property <float> rot: 0;
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.glyph;
+        font-family: "lucide";
+        color: root.tint;
+        font-size: root.size;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        transform-rotation: root.rot * 1deg;
+    }
+}
+
+// Label + icon tile used in the top icon bar.
+component IconTile inherits Rectangle {
+    in property <string> glyph;
+    in property <string> key;
+    in property <color> tint: #b0b0b0;
+    in property <bool> dim: false;
+    in property <bool> highlight: false;
+
+    width: 44px;
+    height: 26px;
+    background: root.highlight ? #2a2a4e : transparent;
+    border-radius: 3px;
+
+    HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 4px;
+        spacing: 3px;
+        alignment: center;
+
+        LucideIcon {
+            glyph: root.glyph;
+            tint: root.dim ? #505060 : root.tint;
+            size: 14px;
+            width: 16px;
+        }
+        Text {
+            text: root.key;
+            color: root.dim ? #505060 : #808090;
+            font-size: 10px;
+            vertical-alignment: center;
+        }
+    }
+}
+
 export component HudWindow inherits Window {
     background: transparent;
 
@@ -30,7 +85,66 @@ export component HudWindow inherits Window {
     in property <string> status-text: "";
     in property <bool> shortcuts-visible: false;
 
-    // Status bar at bottom
+    // New: per-frame state for status glyphs and top-bar affordances.
+    in property <bool> loading: false;
+    in property <bool> secure: false;
+    in property <bool> insecure: false;
+    in property <bool> bookmarked: false;
+    in property <float> zoom: 1.0;
+    in property <bool> can-back: false;
+    in property <bool> can-forward: false;
+
+    // Drives the loader spinner rotation (Slint updates this automatically).
+    property <duration> tick: animation-tick();
+
+    // === Top icon bar — visible only in NORMAL mode ===
+    Rectangle {
+        visible: root.mode-text == "NORMAL";
+        y: 0;
+        width: parent.width;
+        height: 28px;
+        background: #1a1a2eee;
+
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+            spacing: 10px;
+            alignment: start;
+
+            // Navigation group
+            HorizontalLayout {
+                spacing: 2px;
+                IconTile { glyph: "\u{e048}"; key: "H-b"; tint: #7fd4ff; dim: !root.can-back; }       // arrow-left
+                IconTile { glyph: "\u{e049}"; key: "H-f"; tint: #7fd4ff; dim: !root.can-forward; }    // arrow-right
+                IconTile { glyph: "\u{e149}"; key: "r"; tint: #7fd4ff; }                              // rotate-cw
+                IconTile { glyph: "\u{e0f5}"; key: "G"; tint: #7fd4ff; }                              // house
+            }
+
+            Rectangle { width: 1px; background: #2a2a3e; }
+
+            // Tiles group
+            HorizontalLayout {
+                spacing: 2px;
+                IconTile { glyph: "\u{e098}"; key: "H-v"; tint: #00ff88; }    // columns-2 (vsplit)
+                IconTile { glyph: "\u{e439}"; key: "H-s"; tint: #00ff88; }    // rows-2 (hsplit)
+                IconTile { glyph: "\u{e1b2}"; key: "q"; tint: #ff6677; }      // x (close)
+                IconTile { glyph: "\u{e24a}"; key: "z"; tint: #00ff88; }      // arrow-left-right (swap)
+            }
+
+            Rectangle { width: 1px; background: #2a2a3e; }
+
+            // Tools group
+            HorizontalLayout {
+                spacing: 2px;
+                IconTile { glyph: "\u{e180}"; key: "f"; tint: #ff00ff; }      // target (hints)
+                IconTile { glyph: "\u{e151}"; key: "/"; tint: #ffaa00; }      // search
+                IconTile { glyph: "\u{e181}"; key: ":"; tint: #ffff00; }      // terminal (command)
+                IconTile { glyph: "\u{e060}"; key: "B"; tint: #ffdd00; }      // bookmark
+            }
+        }
+    }
+
+    // === Status bar at bottom ===
     Rectangle {
         y: parent.height - 24px;
         width: parent.width;
@@ -40,6 +154,35 @@ export component HudWindow inherits Window {
         HorizontalLayout {
             padding-left: 8px;
             padding-right: 8px;
+            spacing: 6px;
+
+            // Security glyph
+            LucideIcon {
+                visible: root.secure || root.insecure;
+                glyph: "\u{e10b}";  // lock
+                tint: root.secure ? #00ff88 : #ff4444;
+                size: 12px;
+                width: 14px;
+            }
+
+            // Loading spinner
+            LucideIcon {
+                visible: root.loading;
+                glyph: "\u{e109}";  // loader
+                tint: #ffaa00;
+                size: 12px;
+                width: 14px;
+                rot: mod(root.tick / 4ms, 360);
+            }
+
+            // Bookmark indicator
+            LucideIcon {
+                visible: root.bookmarked;
+                glyph: "\u{e176}";  // star
+                tint: #ffdd00;
+                size: 12px;
+                width: 14px;
+            }
 
             Text {
                 text: root.status-text != "" ? root.status-text :
@@ -48,6 +191,22 @@ export component HudWindow inherits Window {
                 font-size: 12px;
                 overflow: elide;
                 horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+
+            // Zoom indicator (hidden when at 100%)
+            LucideIcon {
+                visible: abs(root.zoom - 1.0) > 0.001;
+                glyph: "\u{e1b6}";  // zoom-in
+                tint: #b0b0b0;
+                size: 12px;
+                width: 14px;
+            }
+            Text {
+                visible: abs(root.zoom - 1.0) > 0.001;
+                text: round(root.zoom * 100) + "%";
+                color: #b0b0b0;
+                font-size: 11px;
                 vertical-alignment: center;
             }
 

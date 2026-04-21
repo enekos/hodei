@@ -85,6 +85,12 @@ pub struct App {
     devtools_bridge: Option<crate::devtools_bridge::DevToolsBridge>,
     // DevTools server status (tcp_port, token)
     devtools_status: Option<(u16, String)>,
+    // Last time HODEI_SCREENSHOT wrote a PNG (for 1Hz throttle)
+    last_screenshot: Option<std::time::Instant>,
+    // Per-view load status (drives loading spinner in HUD)
+    tile_load_status: std::collections::HashMap<ViewId, TileLoadStatus>,
+    // Per-view history availability (drives back/forward icon dimming)
+    tile_nav_availability: std::collections::HashMap<ViewId, (bool, bool)>,
 }
 
 impl App {
@@ -131,7 +137,63 @@ impl App {
             pending_paint: false,
             devtools_bridge: None,
             devtools_status: None,
+            last_screenshot: None,
+            tile_load_status: std::collections::HashMap::new(),
+            tile_nav_availability: std::collections::HashMap::new(),
         }
+    }
+
+    fn maybe_dump_screenshot(&mut self, gl: &glow::Context, width: u32, height: u32) {
+        // Throttle to ~1Hz.
+        let now = std::time::Instant::now();
+        if let Some(prev) = self.last_screenshot {
+            if now.duration_since(prev) < std::time::Duration::from_secs(1) {
+                return;
+            }
+        }
+        self.last_screenshot = Some(now);
+
+        let pixel_count = (width as usize) * (height as usize) * 4;
+        let mut buf = vec![0u8; pixel_count];
+        unsafe {
+            gl.read_pixels(
+                0,
+                0,
+                width as i32,
+                height as i32,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                glow::PixelPackData::Slice(Some(&mut buf)),
+            );
+        }
+
+        // glReadPixels returns pixels bottom-up; flip vertically for PNG.
+        let row_bytes = (width as usize) * 4;
+        let mut flipped = vec![0u8; pixel_count];
+        for y in 0..(height as usize) {
+            let src = y * row_bytes;
+            let dst = (height as usize - 1 - y) * row_bytes;
+            flipped[dst..dst + row_bytes].copy_from_slice(&buf[src..src + row_bytes]);
+        }
+
+        std::thread::spawn(move || {
+            let out_dir = std::path::Path::new("target").join("screenshots");
+            if let Err(e) = std::fs::create_dir_all(&out_dir) {
+                log::warn!("screenshot: mkdir failed: {}", e);
+                return;
+            }
+            let path = out_dir.join("latest.png");
+            let img = match image::RgbaImage::from_raw(width, height, flipped) {
+                Some(i) => i,
+                None => {
+                    log::warn!("screenshot: RgbaImage::from_raw failed");
+                    return;
+                }
+            };
+            if let Err(e) = img.save(&path) {
+                log::warn!("screenshot: save failed: {}", e);
+            }
+        });
     }
 
     fn dispatch_actions(&mut self, actions: Vec<Action>) {
@@ -162,6 +224,10 @@ impl App {
                     if let Some(focused) = self.layout.focused() {
                         self.layout.close(focused);
                         self.views.remove(focused);
+                        self.tile_load_status.remove(&focused);
+                        self.tile_nav_availability.remove(&focused);
+                        self.tile_zoom_levels.remove(&focused);
+                        self.status_texts.remove(&focused);
                         if let Some(engine) = &mut self.engine {
                             engine.destroy_tile(focused);
                         }
@@ -816,9 +882,44 @@ impl App {
                 if let Some(view) = self.views.get(focused) {
                     hud.set_url_text(&view.url);
                     hud.set_title_text(&view.title);
+
+                    let lower = view.url.to_ascii_lowercase();
+                    let secure = lower.starts_with("https://");
+                    let insecure = lower.starts_with("http://");
+                    hud.set_secure(secure);
+                    hud.set_insecure(insecure);
+
+                    let bookmarked = self
+                        .bookmarks
+                        .as_ref()
+                        .and_then(|b| b.is_bookmarked(&view.url).ok())
+                        .unwrap_or(false);
+                    hud.set_bookmarked(bookmarked);
                 }
                 let status = self.status_texts.get(&focused).cloned().unwrap_or_default();
                 hud.set_status_text(&status);
+
+                let zoom = self.tile_zoom_levels.get(&focused).copied().unwrap_or(1.0);
+                hud.set_zoom(zoom);
+            }
+
+            if let Some(focused) = self.layout.focused() {
+                let loading = matches!(
+                    self.tile_load_status.get(&focused),
+                    Some(TileLoadStatus::Started) | Some(TileLoadStatus::HeadParsed)
+                );
+                let (can_back, can_forward) = self
+                    .tile_nav_availability
+                    .get(&focused)
+                    .copied()
+                    .unwrap_or((false, false));
+                hud.set_loading(loading);
+                hud.set_can_back(can_back);
+                hud.set_can_forward(can_forward);
+            } else {
+                hud.set_loading(false);
+                hud.set_can_back(false);
+                hud.set_can_forward(false);
             }
 
             hud.set_shortcuts_visible(self.show_shortcuts);
@@ -885,6 +986,14 @@ impl App {
                 MetadataEvent::FrameReady { .. } => {
                     self.pending_paint = true;
                     self.request_redraw();
+                }
+                MetadataEvent::LoadStatusChanged { view_id, status } => {
+                    self.tile_load_status.insert(view_id, status);
+                    needs_hud_update = true;
+                }
+                MetadataEvent::HistoryChanged { view_id, can_back, can_forward } => {
+                    self.tile_nav_availability.insert(view_id, (can_back, can_forward));
+                    needs_hud_update = true;
                 }
                 MetadataEvent::DevToolsStarted { port, token } => {
                     log::info!("DevTools TCP server on port {} (token: {})", port, token);
@@ -1460,7 +1569,18 @@ impl ApplicationHandler<UserEvent> for App {
                     let hud_buffer = hud.render();
                     unsafe { compositor.draw_hud(&gl, hud_buffer); }
                 }
+
                 engine.present();
+
+                // Debug: dump the composited framebuffer to a PNG for vision-based
+                // verification. Gated on HODEI_SCREENSHOT=1; throttled to 1Hz to
+                // stay out of the critical path.
+                if std::env::var_os("HODEI_SCREENSHOT").as_deref() == Some(std::ffi::OsStr::new("1")) {
+                    drop(gl);
+                    let engine = self.engine.as_ref().unwrap();
+                    let gl2 = engine.gl_context();
+                    self.maybe_dump_screenshot(&gl2, win_size.width, win_size.height);
+                }
             }
 
             _ => {}

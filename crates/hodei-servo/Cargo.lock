@@ -3081,6 +3081,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "hodei-core"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "glow",
+ "image",
+ "log",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "slint",
+ "slint-build",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "hodei-servo"
+version = "0.1.0"
+dependencies = [
+ "dpi",
+ "euclid",
+ "glow",
+ "hodei-core",
+ "image",
+ "log",
+ "raw-window-handle",
+ "servo",
+ "url",
+]
+
+[[package]]
 name = "html5ever"
 version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5753,35 +5784,6 @@ name = "ordermap"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a86ed3f5f244b372d6b1a00b72ef7f8876d0bc6a78a4c9985c53614041512063"
-
-[[package]]
-name = "hodei-core"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "glow",
- "log",
- "rusqlite",
- "serde",
- "serde_json",
- "slint",
- "slint-build",
- "toml 0.8.23",
-]
-
-[[package]]
-name = "hodei-servo"
-version = "0.1.0"
-dependencies = [
- "dpi",
- "glow",
- "image",
- "log",
- "hodei-core",
- "raw-window-handle",
- "servo",
- "url",
-]
 
 [[package]]
 name = "owned_ttf_parser"

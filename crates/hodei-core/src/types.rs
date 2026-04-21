@@ -164,6 +164,8 @@ pub enum MetadataEvent {
     TitleChanged { view_id: ViewId, title: String },
     StatusTextChanged { view_id: ViewId, text: Option<String> },
     FrameReady { view_id: ViewId },
+    LoadStatusChanged { view_id: ViewId, status: TileLoadStatus },
+    HistoryChanged { view_id: ViewId, can_back: bool, can_forward: bool },
     DevToolsStarted { port: u16, token: String },
     DevToolsConnectionRequest,
 }

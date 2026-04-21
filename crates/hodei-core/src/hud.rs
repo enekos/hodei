@@ -71,6 +71,11 @@ impl Hud {
         }))
         .expect("set_platform must be called once");
 
+        // Register the bundled Lucide icon font so `font-family: "lucide"`
+        // resolves inside hud.slint. The Slint platform must exist before this
+        // runs, hence we only try after `set_platform`.
+        register_lucide_font();
+
         let hud_instance = HudWindow::new().unwrap();
         hud_instance.show().unwrap();
         let buffer = vec![Rgba8Pixel::default(); (width * height) as usize];
@@ -193,6 +198,34 @@ impl Hud {
         self.hud_instance.set_shortcuts_visible(visible);
     }
 
+    pub fn set_loading(&self, v: bool) {
+        self.hud_instance.set_loading(v);
+    }
+
+    pub fn set_secure(&self, v: bool) {
+        self.hud_instance.set_secure(v);
+    }
+
+    pub fn set_insecure(&self, v: bool) {
+        self.hud_instance.set_insecure(v);
+    }
+
+    pub fn set_bookmarked(&self, v: bool) {
+        self.hud_instance.set_bookmarked(v);
+    }
+
+    pub fn set_zoom(&self, zoom: f32) {
+        self.hud_instance.set_zoom(zoom);
+    }
+
+    pub fn set_can_back(&self, v: bool) {
+        self.hud_instance.set_can_back(v);
+    }
+
+    pub fn set_can_forward(&self, v: bool) {
+        self.hud_instance.set_can_forward(v);
+    }
+
     pub fn clear_hints(&self) {
         let empty: Vec<HintLabel> = vec![];
         let rc = Rc::new(VecModel::from(empty));
@@ -217,4 +250,44 @@ impl Hud {
     pub fn height(&self) -> u32 {
         self.height
     }
+}
+
+/// Locate the bundled Lucide TTF relative to the compiled binary or crate.
+fn find_lucide_font() -> Option<std::path::PathBuf> {
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+
+    if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+        let p = std::path::Path::new(&manifest_dir);
+        candidates.push(p.join("../../assets/fonts/lucide.ttf"));
+        candidates.push(p.join("assets/fonts/lucide.ttf"));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            candidates.push(parent.join("assets/fonts/lucide.ttf"));
+            candidates.push(parent.join("../assets/fonts/lucide.ttf"));
+            candidates.push(parent.join("../../assets/fonts/lucide.ttf"));
+        }
+    }
+    candidates.push(std::path::PathBuf::from("assets/fonts/lucide.ttf"));
+
+    candidates.into_iter().find(|p| p.exists())
+}
+
+fn register_lucide_font() {
+    let Some(path) = find_lucide_font() else {
+        log::warn!("Lucide icon font not found; HUD icon glyphs will render as tofu");
+        return;
+    };
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) => {
+            log::warn!("Failed to read Lucide font {}: {}", path.display(), e);
+            return;
+        }
+    };
+    use slint::fontique_08::fontique;
+    let blob = fontique::Blob::new(std::sync::Arc::new(bytes));
+    let mut collection = slint::fontique_08::shared_collection();
+    let _ = collection.register_fonts(blob, None);
+    log::info!("Registered Lucide icon font from {}", path.display());
 }

@@ -1,4 +1,4 @@
-use hodei_core::types::{ViewId, MetadataEvent};
+use hodei_core::types::{ViewId, MetadataEvent, TileLoadStatus};
 use std::sync::mpsc::Sender;
 
 /// Engine-level delegate.
@@ -67,6 +67,33 @@ impl servo::WebViewDelegate for HodeiWebViewDelegate {
         let _ = self.metadata_tx.send(MetadataEvent::StatusTextChanged {
             view_id: self.view_id,
             text: status,
+        });
+    }
+
+    fn notify_load_status_changed(&self, _webview: servo::WebView, status: servo::LoadStatus) {
+        let mapped = match status {
+            servo::LoadStatus::Started => TileLoadStatus::Started,
+            servo::LoadStatus::HeadParsed => TileLoadStatus::HeadParsed,
+            servo::LoadStatus::Complete => TileLoadStatus::Complete,
+        };
+        let _ = self.metadata_tx.send(MetadataEvent::LoadStatusChanged {
+            view_id: self.view_id,
+            status: mapped,
+        });
+    }
+
+    fn notify_history_changed(
+        &self,
+        _webview: servo::WebView,
+        entries: Vec<url::Url>,
+        current: usize,
+    ) {
+        let can_back = current > 0;
+        let can_forward = current + 1 < entries.len();
+        let _ = self.metadata_tx.send(MetadataEvent::HistoryChanged {
+            view_id: self.view_id,
+            can_back,
+            can_forward,
         });
     }
 }

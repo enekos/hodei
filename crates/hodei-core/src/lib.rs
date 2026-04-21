@@ -6,6 +6,7 @@ pub mod hint;
 pub mod search;
 pub mod session;
 pub mod hud;
+pub mod icons;
 pub mod compositor;
 pub mod db;
 pub mod suggest;
