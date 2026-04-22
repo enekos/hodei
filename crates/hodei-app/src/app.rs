@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::mpsc;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -70,11 +71,11 @@ pub struct App {
     search_result_rx: mpsc::Receiver<search::SearchResult>,
     current_search_result: search::SearchResult,
     // Zoom state (per tile zoom level)
-    tile_zoom_levels: std::collections::HashMap<ViewId, f32>,
+    tile_zoom_levels: HashMap<ViewId, f32>,
     // Last focused tile for swap
     last_focused: Option<ViewId>,
     // Status text per tile (hover URL)
-    status_texts: std::collections::HashMap<ViewId, String>,
+    status_texts: HashMap<ViewId, String>,
     // Theme toggle state
     theme_dark: bool,
     // Keyboard shortcuts modal state
@@ -88,9 +89,9 @@ pub struct App {
     // Last time HODEI_SCREENSHOT wrote a PNG (for 1Hz throttle)
     last_screenshot: Option<std::time::Instant>,
     // Per-view load status (drives loading spinner in HUD)
-    tile_load_status: std::collections::HashMap<ViewId, TileLoadStatus>,
+    tile_load_status: HashMap<ViewId, TileLoadStatus>,
     // Per-view history availability (drives back/forward icon dimming)
-    tile_nav_availability: std::collections::HashMap<ViewId, (bool, bool)>,
+    tile_nav_availability: HashMap<ViewId, (bool, bool)>,
 }
 
 impl App {
@@ -100,10 +101,12 @@ impl App {
             .join("hodei")
             .join("config.toml");
         let config = Config::load(&config_path);
+        log::info!("App::new: config loaded from {:?}", config_path);
         let input = InputRouter::with_overrides(&config.keybindings);
         let (hint_result_tx, hint_result_rx) = mpsc::channel();
         let (search_result_tx, search_result_rx) = mpsc::channel();
 
+        log::info!("App::new: initialized");
         Self {
             proxy,
             config,
@@ -129,17 +132,17 @@ impl App {
             search_result_tx,
             search_result_rx,
             current_search_result: search::SearchResult { index: 0, count: 0 },
-            tile_zoom_levels: std::collections::HashMap::new(),
+            tile_zoom_levels: HashMap::new(),
             last_focused: None,
-            status_texts: std::collections::HashMap::new(),
+            status_texts: HashMap::new(),
             theme_dark: false,
             show_shortcuts: false,
             pending_paint: false,
             devtools_bridge: None,
             devtools_status: None,
             last_screenshot: None,
-            tile_load_status: std::collections::HashMap::new(),
-            tile_nav_availability: std::collections::HashMap::new(),
+            tile_load_status: HashMap::new(),
+            tile_nav_availability: HashMap::new(),
         }
     }
 
@@ -148,10 +151,12 @@ impl App {
         let now = std::time::Instant::now();
         if let Some(prev) = self.last_screenshot {
             if now.duration_since(prev) < std::time::Duration::from_secs(1) {
+                log::trace!("maybe_dump_screenshot: throttled");
                 return;
             }
         }
         self.last_screenshot = Some(now);
+        log::debug!("maybe_dump_screenshot: capturing {}x{}", width, height);
 
         let pixel_count = (width as usize) * (height as usize) * 4;
         let mut buf = vec![0u8; pixel_count];
@@ -192,24 +197,33 @@ impl App {
             };
             if let Err(e) = img.save(&path) {
                 log::warn!("screenshot: save failed: {}", e);
+            } else {
+                log::info!("screenshot: saved to {}", path.display());
             }
         });
     }
 
     fn dispatch_actions(&mut self, actions: Vec<Action>) {
+        for action in &actions {
+            log::debug!("dispatch_actions: {:?}", action);
+        }
         for action in actions {
             match action {
                 Action::FocusNeighbor(dir) => {
                     if let Some(focused) = self.layout.focused() {
                         if let Some(neighbor) = self.layout.focus_neighbor(focused, dir) {
+                            log::info!("FocusNeighbor: {:?} -> {:?}", focused, neighbor);
                             self.layout.set_focused(neighbor);
                             self.update_hud();
+                        } else {
+                            log::debug!("FocusNeighbor: no neighbor in direction {:?} from {:?}", dir, focused);
                         }
                     }
                 }
                 Action::SplitView(dir) => {
                     if let Some(focused) = self.layout.focused() {
                         let new_id = self.views.create("about:blank");
+                        log::info!("SplitView: focused={:?} new_id={:?} dir={:?}", focused, new_id, dir);
                         self.layout.split(focused, dir, new_id);
                         let (w, h) = self.tile_size(new_id);
                         if let Some(engine) = &mut self.engine {
@@ -222,12 +236,16 @@ impl App {
                 }
                 Action::CloseView => {
                     if let Some(focused) = self.layout.focused() {
+                        log::info!("CloseView: {:?}", focused);
                         self.layout.close(focused);
                         self.views.remove(focused);
                         self.tile_load_status.remove(&focused);
                         self.tile_nav_availability.remove(&focused);
                         self.tile_zoom_levels.remove(&focused);
                         self.status_texts.remove(&focused);
+                        if self.last_focused == Some(focused) {
+                            self.last_focused = None;
+                        }
                         if let Some(engine) = &mut self.engine {
                             engine.destroy_tile(focused);
                         }
@@ -241,6 +259,7 @@ impl App {
                             Direction::Right | Direction::Down => delta,
                             Direction::Left | Direction::Up => -delta,
                         };
+                        log::debug!("ResizeSplit: focused={:?} dir={:?} delta={}", focused, dir, signed_delta);
                         self.layout.resize_split(focused, signed_delta);
                         self.resize_all_tiles();
                         self.request_redraw();
@@ -248,6 +267,7 @@ impl App {
                 }
                 Action::ForwardToServo(key_event) => {
                     if let Some(focused) = self.layout.focused() {
+                        log::trace!("ForwardToServo: view={:?} key={:?}", focused, key_event.key);
                         if let Some(engine) = &self.engine {
                             engine.send_input(focused, key_event);
                         }
@@ -267,6 +287,7 @@ impl App {
                     };
 
                     if let Some(focused) = self.layout.focused() {
+                        log::info!("Navigate: view={:?} url={}", focused, url);
                         if let Some(engine) = &self.engine {
                             engine.navigate(focused, &url);
                         }
@@ -280,6 +301,7 @@ impl App {
                 }
                 Action::Back => {
                     if let Some(focused) = self.layout.focused() {
+                        log::debug!("Back: view={:?}", focused);
                         if let Some(engine) = &self.engine {
                             engine.go_back(focused);
                         }
@@ -287,6 +309,7 @@ impl App {
                 }
                 Action::Forward => {
                     if let Some(focused) = self.layout.focused() {
+                        log::debug!("Forward: view={:?}", focused);
                         if let Some(engine) = &self.engine {
                             engine.go_forward(focused);
                         }
@@ -296,6 +319,7 @@ impl App {
                     if let Some(focused) = self.layout.focused() {
                         if let Some(view) = self.views.get(focused) {
                             let url = view.url.clone();
+                            log::info!("Reload: view={:?} url={}", focused, url);
                             if let Some(engine) = &self.engine {
                                 engine.navigate(focused, &url);
                             }
@@ -304,6 +328,7 @@ impl App {
                 }
                 Action::EnterHintMode => {
                     if let Some(focused) = self.layout.focused() {
+                        log::info!("EnterHintMode: view={:?}", focused);
                         if let Some(engine) = &self.engine {
                             let tx = self.hint_result_tx.clone();
                             engine.evaluate_js(
@@ -319,6 +344,7 @@ impl App {
                     }
                 }
                 Action::ActivateHint(label) => {
+                    log::info!("ActivateHint: label={}", label);
                     if let Some(idx) = self.hint_labels.iter().position(|l| l == &label) {
                         if let Some(elem) = self.hint_elements.get(idx) {
                             if let Some(focused) = self.layout.focused() {
@@ -335,13 +361,15 @@ impl App {
                     }
                     self.update_hud();
                 }
-                Action::HintCharTyped(_) => {
+                Action::HintCharTyped(c) => {
+                    log::trace!("HintCharTyped: {}", c);
                     self.update_hint_display();
                 }
                 Action::EnterInsert | Action::EnterCommand | Action::ExitToNormal => {
                     self.update_hud();
                 }
                 Action::EnterSearch => {
+                    log::info!("EnterSearch");
                     if let Some(hud) = &self.hud {
                         hud.set_search_visible(true);
                         hud.set_search_text("");
@@ -350,6 +378,7 @@ impl App {
                     self.update_hud();
                 }
                 Action::SearchQueryChanged(query) => {
+                    log::trace!("SearchQueryChanged: {}", query);
                     self.last_search_query = query.clone();
                     if let Some(hud) = &self.hud {
                         hud.set_search_text(&query);
@@ -361,12 +390,15 @@ impl App {
                     self.update_hud();
                 }
                 Action::SearchNext => {
+                    log::debug!("SearchNext");
                     self.inject_search_navigate(1);
                 }
                 Action::SearchPrev => {
+                    log::debug!("SearchPrev");
                     self.inject_search_navigate(-1);
                 }
                 Action::SearchClear => {
+                    log::debug!("SearchClear");
                     self.last_search_query.clear();
                     self.current_search_result = search::SearchResult { index: 0, count: 0 };
                     self.inject_search_clear();
@@ -378,6 +410,7 @@ impl App {
                     self.update_hud();
                 }
                 Action::SaveSession => {
+                    log::info!("SaveSession");
                     let (nodes, focused) = self.layout.serialize();
                     let tiles = self.collect_tile_rows();
                     if let Some(workspace) = &mut self.workspace {
@@ -389,10 +422,11 @@ impl App {
                     }
                 }
                 Action::RestoreSession => {
-                    // Use workspace switch for restore
+                    log::info!("RestoreSession");
                     self.dispatch_actions(vec![Action::WorkspaceSwitch("default".to_string())]);
                 }
                 Action::Quit => {
+                    log::info!("Quit");
                     self.autosave();
                     if let Some(window) = &self.window {
                         window.request_redraw();
@@ -410,33 +444,39 @@ impl App {
                     }
                 }
                 Action::BookmarkDelete(url) => {
+                    log::info!("BookmarkDelete: {}", url);
                     if let Some(bookmarks) = &self.bookmarks {
                         let _ = bookmarks.remove(&url);
                     }
                 }
                 Action::ShowBookmarks(query) => {
+                    log::info!("ShowBookmarks: query='{}'", query);
                     if let Some(bookmarks) = &self.bookmarks {
                         let _results = bookmarks.search(&query, 20).unwrap_or_default();
                         log::info!("Bookmarks search: {} results", _results.len());
                     }
                 }
                 Action::ShowHistory(query) => {
+                    log::info!("ShowHistory: query='{}'", query);
                     if let Some(history) = &self.history {
                         let _results = history.search(&query, 20).unwrap_or_default();
                         log::info!("History search: {} results", _results.len());
                     }
                 }
                 Action::CommandBufferChanged => {
+                    log::trace!("CommandBufferChanged");
                     self.update_suggestions();
                     self.update_hud();
                 }
                 Action::SuggestionNext => {
+                    log::trace!("SuggestionNext");
                     if !self.suggestions.is_empty() {
                         self.suggestion_index = (self.suggestion_index + 1) % self.suggestions.len();
                         self.update_suggestion_display();
                     }
                 }
                 Action::SuggestionPrev => {
+                    log::trace!("SuggestionPrev");
                     if !self.suggestions.is_empty() {
                         self.suggestion_index = if self.suggestion_index == 0 {
                             self.suggestions.len() - 1
@@ -447,13 +487,16 @@ impl App {
                     }
                 }
                 Action::ZoomIn => {
+                    log::debug!("ZoomIn");
                     self.adjust_zoom(0.1);
                 }
                 Action::ZoomOut => {
+                    log::debug!("ZoomOut");
                     self.adjust_zoom(-0.1);
                 }
                 Action::ZoomReset => {
                     if let Some(focused) = self.layout.focused() {
+                        log::info!("ZoomReset: view={:?}", focused);
                         self.tile_zoom_levels.insert(focused, 1.0);
                         self.apply_zoom(focused, 1.0);
                     }
@@ -467,11 +510,13 @@ impl App {
                     }
                 }
                 Action::WorkspaceSwitch(name) => {
+                    log::info!("WorkspaceSwitch: {}", name);
                     let (current_nodes, current_focused) = self.layout.serialize();
                     let current_tiles = self.collect_tile_rows();
                     if let Some(workspace) = &mut self.workspace {
                         match workspace.switch_to(&name, &current_nodes, &current_tiles, current_focused) {
                             Ok(Some(state)) => {
+                                log::info!("WorkspaceSwitch: restoring workspace '{}' with {} tiles", name, state.tiles.len());
                                 // Tear down current
                                 for view_id in self.views.all_views() {
                                     if let Some(engine) = &mut self.engine {
@@ -494,6 +539,7 @@ impl App {
                                 self.request_redraw();
                             }
                             Ok(None) => {
+                                log::info!("WorkspaceSwitch: creating new empty workspace '{}'", name);
                                 // New empty workspace
                                 for view_id in self.views.all_views() {
                                     if let Some(engine) = &mut self.engine {
@@ -519,10 +565,11 @@ impl App {
                     }
                 }
                 Action::WorkspaceNew(name) => {
-                    // WorkspaceSwitch handles creating new workspaces
+                    log::info!("WorkspaceNew: {}", name);
                     self.dispatch_actions(vec![Action::WorkspaceSwitch(name)]);
                 }
                 Action::WorkspaceDelete(name) => {
+                    log::info!("WorkspaceDelete: {}", name);
                     if let Some(workspace) = &mut self.workspace {
                         match workspace.delete(&name) {
                             Ok(true) => log::info!("Deleted workspace: {}", name),
@@ -532,6 +579,7 @@ impl App {
                     }
                 }
                 Action::WorkspaceList => {
+                    log::info!("WorkspaceList");
                     if let Some(workspace) = &self.workspace {
                         if let Ok(list) = workspace.list() {
                             for info in &list {
@@ -543,6 +591,7 @@ impl App {
                 Action::FocusNext => {
                     if let Some(focused) = self.layout.focused() {
                         if let Some(next) = self.layout.next_focus(focused) {
+                            log::info!("FocusNext: {:?} -> {:?}", focused, next);
                             self.last_focused = Some(focused);
                             self.layout.set_focused(next);
                             self.update_hud();
@@ -552,6 +601,7 @@ impl App {
                 Action::FocusPrev => {
                     if let Some(focused) = self.layout.focused() {
                         if let Some(prev) = self.layout.prev_focus(focused) {
+                            log::info!("FocusPrev: {:?} -> {:?}", focused, prev);
                             self.last_focused = Some(focused);
                             self.layout.set_focused(prev);
                             self.update_hud();
@@ -560,26 +610,31 @@ impl App {
                 }
                 Action::ScrollPageDown => {
                     if let Some(focused) = self.layout.focused() {
+                        log::trace!("ScrollPageDown: view={:?}", focused);
                         self.inject_scroll(focused, "window.scrollBy(0, window.innerHeight / 2)");
                     }
                 }
                 Action::ScrollPageUp => {
                     if let Some(focused) = self.layout.focused() {
+                        log::trace!("ScrollPageUp: view={:?}", focused);
                         self.inject_scroll(focused, "window.scrollBy(0, -window.innerHeight / 2)");
                     }
                 }
                 Action::ScrollToTop => {
                     if let Some(focused) = self.layout.focused() {
+                        log::trace!("ScrollToTop: view={:?}", focused);
                         self.inject_scroll(focused, "window.scrollTo(0, 0)");
                     }
                 }
                 Action::ScrollToBottom => {
                     if let Some(focused) = self.layout.focused() {
+                        log::trace!("ScrollToBottom: view={:?}", focused);
                         self.inject_scroll(focused, "window.scrollTo(0, document.body.scrollHeight)");
                     }
                 }
                 Action::HardReload => {
                     if let Some(focused) = self.layout.focused() {
+                        log::info!("HardReload: view={:?}", focused);
                         if let Some(engine) = &self.engine {
                             engine.hard_reload(focused);
                         }
@@ -587,12 +642,9 @@ impl App {
                 }
                 Action::PasteNavigate => {
                     if let Some(url) = self.read_clipboard() {
-                        let url = if url.starts_with("http://") || url.starts_with("https://") {
-                            url
-                        } else {
-                            self.config.search_url(&url)
-                        };
+                        let url = Self::normalize_pasted_url(&url, &self.config);
                         if let Some(focused) = self.layout.focused() {
+                            log::info!("PasteNavigate: view={:?} url={}", focused, url);
                             if let Some(engine) = &self.engine {
                                 engine.navigate(focused, &url);
                             }
@@ -601,16 +653,15 @@ impl App {
                             }
                         }
                         self.update_hud();
+                    } else {
+                        log::warn!("PasteNavigate: clipboard empty or unreadable");
                     }
                 }
                 Action::PasteNewTile => {
                     if let Some(url) = self.read_clipboard() {
-                        let url = if url.starts_with("http://") || url.starts_with("https://") {
-                            url
-                        } else {
-                            self.config.search_url(&url)
-                        };
+                        let url = Self::normalize_pasted_url(&url, &self.config);
                         if let Some(focused) = self.layout.focused() {
+                            log::info!("PasteNewTile: from={:?} url={}", focused, url);
                             let new_id = self.views.create(&url);
                             self.layout.split(focused, hodei_core::types::SplitDirection::Vertical, new_id);
                             let (w, h) = self.tile_size(new_id);
@@ -621,12 +672,15 @@ impl App {
                             self.update_hud();
                             self.request_redraw();
                         }
+                    } else {
+                        log::warn!("PasteNewTile: clipboard empty or unreadable");
                     }
                 }
                 Action::DuplicateTile => {
                     if let Some(focused) = self.layout.focused() {
                         if let Some(view) = self.views.get(focused) {
                             let url = view.url.clone();
+                            log::info!("DuplicateTile: from={:?} url={}", focused, url);
                             let new_id = self.views.create(&url);
                             self.layout.split(focused, hodei_core::types::SplitDirection::Vertical, new_id);
                             let (w, h) = self.tile_size(new_id);
@@ -651,6 +705,7 @@ impl App {
                     if let Some(focused) = self.layout.focused() {
                         if let Some(view) = self.views.get(focused) {
                             let url = format!("view-source:{}", view.url);
+                            log::info!("ViewSource: view={:?} url={}", focused, url);
                             if let Some(engine) = &self.engine {
                                 engine.navigate(focused, &url);
                             }
@@ -660,6 +715,7 @@ impl App {
                 Action::GoHome => {
                     if let Some(focused) = self.layout.focused() {
                         let url = self.config.general.startup_url.clone();
+                        log::info!("GoHome: view={:?} url={}", focused, url);
                         if let Some(engine) = &self.engine {
                             engine.navigate(focused, &url);
                         }
@@ -680,6 +736,7 @@ impl App {
                                     .unwrap_or("/");
                                 let _ = url.set_path(new_path);
                                 let url_str = url.to_string();
+                                log::info!("GoUp: view={:?} -> {}", focused, url_str);
                                 if let Some(engine) = &self.engine {
                                     engine.navigate(focused, &url_str);
                                 }
@@ -695,6 +752,7 @@ impl App {
                             if let Ok(mut url) = url::Url::parse(&view.url) {
                                 let _ = url.set_path("/");
                                 let url_str = url.to_string();
+                                log::info!("GoToRoot: view={:?} -> {}", focused, url_str);
                                 if let Some(engine) = &self.engine {
                                     engine.navigate(focused, &url_str);
                                 }
@@ -705,6 +763,7 @@ impl App {
                     }
                 }
                 Action::ResetSplits => {
+                    log::info!("ResetSplits");
                     self.layout.reset_splits();
                     self.request_redraw();
                 }
@@ -712,6 +771,7 @@ impl App {
                     if let Some(focused) = self.layout.focused() {
                         if let Some(last) = self.last_focused {
                             if last != focused {
+                                log::info!("SwapTiles: {:?} <-> {:?}", focused, last);
                                 self.layout.swap_tiles(focused, last);
                                 self.last_focused = Some(focused);
                                 self.request_redraw();
@@ -733,6 +793,7 @@ impl App {
                     if let Some(bookmarks) = &self.bookmarks {
                         if let Ok(Some(qm)) = bookmarks.get_quickmark(slot) {
                             if let Some(focused) = self.layout.focused() {
+                                log::info!("JumpQuickmark: slot={} -> {}", slot, qm.url);
                                 if let Some(engine) = &self.engine {
                                     engine.navigate(focused, &qm.url);
                                 }
@@ -746,13 +807,14 @@ impl App {
                 }
                 Action::ToggleTheme => {
                     self.theme_dark = !self.theme_dark;
+                    log::info!("Theme toggled: {}", if self.theme_dark { "dark" } else { "light" });
                     if let Some(engine) = &self.engine {
                         engine.set_theme(self.theme_dark);
                     }
-                    log::info!("Theme toggled: {}", if self.theme_dark { "dark" } else { "light" });
                 }
                 Action::ShowShortcuts => {
                     self.show_shortcuts = !self.show_shortcuts;
+                    log::info!("ShowShortcuts: {}", self.show_shortcuts);
                     self.update_hud();
                 }
                 Action::DevToolsShow => {
@@ -779,6 +841,16 @@ impl App {
                     self.update_hud();
                 }
             }
+        }
+    }
+
+    /// Normalize a pasted string into a navigable URL.
+    fn normalize_pasted_url(text: &str, config: &Config) -> String {
+        let trimmed = text.trim();
+        if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+            trimmed.to_string()
+        } else {
+            config.search_url(trimmed)
         }
     }
 
@@ -827,6 +899,7 @@ impl App {
 
                     self.suggestions = suggest::rank_suggestions(all, 10);
                     self.suggestion_index = 0;
+                    log::debug!("update_suggestions: query='{}' -> {} suggestions", query, self.suggestions.len());
                 }
             } else {
                 self.suggestions.clear();
@@ -858,6 +931,7 @@ impl App {
     }
 
     fn update_hud(&self) {
+        log::trace!("update_hud");
         if let Some(hud) = &self.hud {
             let mode_str = match self.input.mode() {
                 Mode::Normal => "NORMAL",
@@ -878,8 +952,9 @@ impl App {
             let tile_count = self.layout.resolve().len();
             hud.set_tile_count(tile_count as i32);
 
-            if let Some(focused) = self.layout.focused() {
-                if let Some(view) = self.views.get(focused) {
+            let focused = self.layout.focused();
+            if let Some(focused_id) = focused {
+                if let Some(view) = self.views.get(focused_id) {
                     hud.set_url_text(&view.url);
                     hud.set_title_text(&view.title);
 
@@ -896,21 +971,21 @@ impl App {
                         .unwrap_or(false);
                     hud.set_bookmarked(bookmarked);
                 }
-                let status = self.status_texts.get(&focused).cloned().unwrap_or_default();
+                let status = self.status_texts.get(&focused_id).cloned().unwrap_or_default();
                 hud.set_status_text(&status);
 
-                let zoom = self.tile_zoom_levels.get(&focused).copied().unwrap_or(1.0);
+                let zoom = self.tile_zoom_levels.get(&focused_id).copied().unwrap_or(1.0);
                 hud.set_zoom(zoom);
             }
 
-            if let Some(focused) = self.layout.focused() {
+            if let Some(focused_id) = focused {
                 let loading = matches!(
-                    self.tile_load_status.get(&focused),
+                    self.tile_load_status.get(&focused_id),
                     Some(TileLoadStatus::Started) | Some(TileLoadStatus::HeadParsed)
                 );
                 let (can_back, can_forward) = self
                     .tile_nav_availability
-                    .get(&focused)
+                    .get(&focused_id)
                     .copied()
                     .unwrap_or((false, false));
                 hud.set_loading(loading);
@@ -941,6 +1016,7 @@ impl App {
                         })
                     })
                     .collect();
+                log::trace!("update_hint_display: filter='{}' displaying {} hints", filter, display.len());
                 hud.set_hints(display);
                 hud.request_redraw();
             }
@@ -954,6 +1030,7 @@ impl App {
         };
         let mut needs_hud_update = false;
         for event in events {
+            log::debug!("process_metadata_events: {:?}", event);
             match event {
                 MetadataEvent::UrlChanged { view_id, url } => {
                     if let Some(view) = self.views.get_mut(view_id) {
@@ -1020,6 +1097,7 @@ impl App {
             match hint::parse_hint_elements(&json) {
                 Ok(elements) => {
                     let labels = hint::generate_labels(elements.len());
+                    log::info!("process_hint_results: parsed {} hint elements", elements.len());
                     self.hint_labels = labels.clone();
                     self.hint_elements = elements;
                     self.input.enter_hint_mode(labels);
@@ -1038,6 +1116,7 @@ impl App {
             if let Some(engine) = &self.engine {
                 let tx = self.search_result_tx.clone();
                 let q = query.to_string();
+                log::trace!("inject_search_init: view={:?} query='{}'", focused, q);
                 engine.evaluate_js(
                     focused,
                     &format!("{}('{}')", search::SEARCH_INIT_SCRIPT.trim_end_matches("()"), q.replace('\\', "\\\\").replace('\'', "\\'")),
@@ -1059,6 +1138,7 @@ impl App {
         if let Some(focused) = self.layout.focused() {
             if let Some(engine) = &self.engine {
                 let tx = self.search_result_tx.clone();
+                log::trace!("inject_search_navigate: view={:?} offset={}", focused, offset);
                 engine.evaluate_js(
                     focused,
                     &format!("{}({})", search::SEARCH_NAVIGATE_SCRIPT.trim_end_matches("()"), offset),
@@ -1083,6 +1163,7 @@ impl App {
     fn inject_search_clear(&self) {
         if let Some(focused) = self.layout.focused() {
             if let Some(engine) = &self.engine {
+                log::trace!("inject_search_clear: view={:?}", focused);
                 engine.evaluate_js(
                     focused,
                     &format!("{}()", search::SEARCH_CLEAR_SCRIPT),
@@ -1094,6 +1175,7 @@ impl App {
 
     fn process_search_results(&mut self) {
         while let Ok(result) = self.search_result_rx.try_recv() {
+            log::debug!("process_search_results: {:?}", result);
             self.current_search_result = result.clone();
             if let Some(hud) = &self.hud {
                 hud.set_search_info(&result.info_string());
@@ -1106,6 +1188,7 @@ impl App {
         if let Some(focused) = self.layout.focused() {
             let current = self.tile_zoom_levels.get(&focused).copied().unwrap_or(1.0);
             let new_zoom = (current + delta).clamp(0.25, 5.0);
+            log::info!("adjust_zoom: view={:?} {} -> {}", focused, current, new_zoom);
             self.tile_zoom_levels.insert(focused, new_zoom);
             self.apply_zoom(focused, new_zoom);
         }
@@ -1119,6 +1202,7 @@ impl App {
 
     fn inject_scroll(&self, view_id: ViewId, script: &str) {
         if let Some(engine) = &self.engine {
+            log::trace!("inject_scroll: view={:?} script_len={}", view_id, script.len());
             engine.evaluate_js(view_id, script, Box::new(|_| {}));
         }
     }
@@ -1143,6 +1227,7 @@ impl App {
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(text.as_bytes());
         }
+        log::debug!("copy_to_clipboard: wrote {} bytes to clipboard", text.len());
     }
 
     fn read_clipboard(&self) -> Option<String> {
@@ -1161,7 +1246,9 @@ impl App {
         #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         compile_error!("clipboard not implemented for this OS");
 
-        String::from_utf8(output.stdout).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+        let result = String::from_utf8(output.stdout).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        log::debug!("read_clipboard: result={:?}", result.as_ref().map(|s| s.len()));
+        result
     }
 
     fn click_to_focus(&mut self, x: f32, y: f32) {
@@ -1169,6 +1256,7 @@ impl App {
         for (view_id, rect) in resolved {
             if rect.contains(x, y) {
                 if self.layout.focused() != Some(view_id) {
+                    log::info!("click_to_focus: ({}, {}) -> view {:?}", x, y, view_id);
                     self.layout.set_focused(view_id);
                     self.update_hud();
                     self.request_redraw();
@@ -1182,8 +1270,7 @@ impl App {
         // Only forward mouse events when in Insert mode or for clicks/scrolling
         if let Some(focused) = self.layout.focused() {
             // Convert global window coordinates to tile-local coordinates
-            let local_event = if let Some(resolved) = self.layout.resolve().into_iter().find(|(id, _)| *id == focused) {
-                let rect = resolved.1;
+            let local_event = if let Some((_, rect)) = self.layout.resolve().iter().find(|(id, _)| *id == focused) {
                 match event {
                     CoreMouseEvent::Move { x, y } => CoreMouseEvent::Move {
                         x: x - rect.x,
@@ -1209,6 +1296,7 @@ impl App {
             } else {
                 event
             };
+            log::trace!("dispatch_mouse_event: view={:?} local_event={:?}", focused, local_event);
             if let Some(engine) = &self.engine {
                 engine.send_mouse_event(focused, local_event);
             }
@@ -1229,6 +1317,7 @@ impl App {
 
     fn resize_all_tiles(&mut self) {
         let resolved = self.layout.resolve();
+        log::debug!("resize_all_tiles: resizing {} tiles", resolved.len());
         if let Some(engine) = &mut self.engine {
             for (view_id, rect) in &resolved {
                 engine.resize_tile(*view_id, rect.width as u32, rect.height as u32);
@@ -1238,6 +1327,7 @@ impl App {
 
     fn request_redraw(&self) {
         if let Some(window) = &self.window {
+            log::trace!("request_redraw");
             window.request_redraw();
         }
     }
@@ -1270,6 +1360,8 @@ impl App {
         if let Some(workspace) = &mut self.workspace {
             if let Err(e) = workspace.save_active(&nodes, &tiles, focused) {
                 log::error!("Autosave failed: {}", e);
+            } else {
+                log::info!("Autosave successful");
             }
         }
     }
@@ -1305,12 +1397,15 @@ impl App {
             alt: self.modifiers.alt_key(),
             meta: self.modifiers.super_key(),
         };
-        Some(CoreKeyEvent { key, state, modifiers })
+        let core_event = CoreKeyEvent { key, state, modifiers };
+        log::trace!("convert_key_event: winit={:?} -> core={:?}", event.logical_key, core_event.key);
+        Some(core_event)
     }
 }
 
 impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        log::info!("App::resumed: creating window");
         let window = event_loop
             .create_window(
                 WindowAttributes::default()
@@ -1320,6 +1415,7 @@ impl ApplicationHandler<UserEvent> for App {
             .expect("Failed to create window");
 
         let size = window.inner_size();
+        log::info!("App::resumed: window created {}x{}", size.width, size.height);
 
         // Initialize Servo engine
         use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -1328,6 +1424,7 @@ impl ApplicationHandler<UserEvent> for App {
         let waker = Box::new(WinitWaker { proxy: self.proxy.clone() });
 
         let preferences = if self.config.devtools.enabled {
+            log::info!("DevTools enabled on TCP port {}", self.config.devtools.tcp_port);
             Some(Engine::devtools_preferences(self.config.devtools.tcp_port))
         } else {
             None
@@ -1351,14 +1448,17 @@ impl ApplicationHandler<UserEvent> for App {
 
         let mut restored = false;
         if let Ok(conn) = db::open_database(&db_path) {
+            log::info!("App::resumed: database opened at {:?}", db_path);
             self.history = Some(HistoryManager::new(conn.clone(), self.config.history.max_entries));
             self.bookmarks = Some(BookmarkManager::new(conn.clone()));
             let mut wm = WorkspaceManager::new(conn);
 
             // Try to restore last workspace
             if self.config.general.restore_workspace_on_startup {
+                log::info!("App::resumed: attempting to restore default workspace");
                 if let Ok(Some(state)) = wm.switch_to("default", &[], &[], None) {
                     if !state.tiles.is_empty() {
+                        log::info!("App::resumed: restoring {} tiles", state.tiles.len());
                         self.layout = BspLayout::deserialize(
                             Rect::new(0.0, 0.0, size.width as f32, size.height as f32),
                             &state.nodes,
@@ -1376,19 +1476,24 @@ impl ApplicationHandler<UserEvent> for App {
                             engine.create_tile(tile.view_id, &tile.url, w, h);
                         }
                         restored = true;
+                    } else {
+                        log::info!("App::resumed: default workspace is empty");
                     }
                 }
                 wm.set_active("default");
             }
 
             self.workspace = Some(wm);
+        } else {
+            log::warn!("App::resumed: failed to open database at {:?}", db_path);
         }
 
         if !restored {
-            let startup_url = &self.config.general.startup_url.clone();
-            let view_id = self.views.create(startup_url);
+            let startup_url = self.config.general.startup_url.clone();
+            log::info!("App::resumed: creating initial tile with {}", startup_url);
+            let view_id = self.views.create(&startup_url);
             self.layout.add_first_view(view_id);
-            engine.create_tile(view_id, startup_url, size.width, size.height);
+            engine.create_tile(view_id, &startup_url, size.width, size.height);
         }
 
         // Resize all tiles to match the initial layout rects.
@@ -1411,11 +1516,13 @@ impl ApplicationHandler<UserEvent> for App {
         self.compositor = Some(compositor);
         self.update_hud();
         self.request_redraw();
+        log::info!("App::resumed: fully initialized");
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => {
+                log::info!("WindowEvent::CloseRequested");
                 self.autosave();
                 if let Some(mut bridge) = self.devtools_bridge.take() {
                     bridge.stop();
@@ -1430,21 +1537,29 @@ impl ApplicationHandler<UserEvent> for App {
                             && (core_event.key == CoreKey::Escape
                                 || core_event.key == CoreKey::Char('?'))
                         {
+                            log::debug!("KeyboardInput: closing shortcuts modal");
                             self.show_shortcuts = false;
                             self.update_hud();
                         }
                         return;
                     }
                     let actions = self.input.handle(&core_event);
+                    if !actions.is_empty() {
+                        log::debug!("KeyboardInput: {:?} -> {} action(s)", core_event.key, actions.len());
+                    }
                     self.dispatch_actions(actions);
+                } else {
+                    log::trace!("KeyboardInput: unmapped key {:?}", event.logical_key);
                 }
             }
 
             WindowEvent::ModifiersChanged(new_modifiers) => {
+                log::trace!("ModifiersChanged: {:?}", new_modifiers.state());
                 self.modifiers = new_modifiers.state();
             }
 
             WindowEvent::CursorMoved { position, .. } => {
+                log::trace!("CursorMoved: ({}, {})", position.x, position.y);
                 self.mouse_position = (position.x, position.y);
                 self.dispatch_mouse_event(CoreMouseEvent::Move {
                     x: position.x as f32,
@@ -1458,10 +1573,12 @@ impl ApplicationHandler<UserEvent> for App {
                 if button_state == winit::event::ElementState::Pressed {
                     match button {
                         winit::event::MouseButton::Back => {
+                            log::debug!("MouseInput: Back button pressed");
                             self.dispatch_actions(vec![Action::Back]);
                             return;
                         }
                         winit::event::MouseButton::Forward => {
+                            log::debug!("MouseInput: Forward button pressed");
                             self.dispatch_actions(vec![Action::Forward]);
                             return;
                         }
@@ -1492,6 +1609,7 @@ impl ApplicationHandler<UserEvent> for App {
                 if let CoreMouseEvent::Down { x, y, .. } = event {
                     self.click_to_focus(x, y);
                 }
+                log::trace!("MouseInput: {:?} {:?} at ({}, {})", button_state, button, mx, my);
                 self.dispatch_mouse_event(event);
             }
 
@@ -1501,6 +1619,7 @@ impl ApplicationHandler<UserEvent> for App {
                     winit::event::MouseScrollDelta::LineDelta(x, y) => (x * 20.0, y * 20.0),
                     winit::event::MouseScrollDelta::PixelDelta(p) => (p.x as f32, p.y as f32),
                 };
+                log::trace!("MouseWheel: delta={:?} -> dx={} dy={}", delta, dx, dy);
                 self.dispatch_mouse_event(CoreMouseEvent::Scroll {
                     x: mx as f32,
                     y: my as f32,
@@ -1510,6 +1629,7 @@ impl ApplicationHandler<UserEvent> for App {
             }
 
             WindowEvent::Resized(size) => {
+                log::info!("WindowEvent::Resized: {}x{}", size.width, size.height);
                 self.layout.set_viewport(Rect::new(
                     0.0, 0.0,
                     size.width as f32, size.height as f32,
@@ -1538,8 +1658,10 @@ impl ApplicationHandler<UserEvent> for App {
                     .map(|w| w.inner_size())
                     .unwrap_or(winit::dpi::PhysicalSize::new(0, 0));
                 let window_h = win_size.height as i32;
+                log::trace!("RedrawRequested: {} tiles, window={}x{}", resolved.len(), win_size.width, win_size.height);
 
                 if self.pending_paint {
+                    log::trace!("RedrawRequested: pending_paint=true, painting {} tiles", resolved.len());
                     self.pending_paint = false;
                     for (view_id, _) in &resolved {
                         engine.paint_tile(*view_id);
@@ -1552,6 +1674,7 @@ impl ApplicationHandler<UserEvent> for App {
                     gl.viewport(0, 0, win_size.width as i32, window_h);
                     gl.disable(glow::SCISSOR_TEST);
                     gl.clear_color(0.05, 0.05, 0.1, 1.0);
+                    log::trace!("RedrawRequested: clearing framebuffer");
                     gl.clear(glow::COLOR_BUFFER_BIT);
                 }
 
@@ -1562,15 +1685,18 @@ impl ApplicationHandler<UserEvent> for App {
                         euclid::default::Point2D::new(rect.x as i32, gl_y),
                         euclid::default::Size2D::new(rect.width as i32, rect.height as i32),
                     );
+                    log::trace!("RedrawRequested: blitting view {:?} to {:?}", view_id, target);
                     engine.blit_tile_to_window(*view_id, target);
                 }
 
                 if let (Some(hud), Some(compositor)) = (self.hud.as_mut(), self.compositor.as_ref()) {
                     let hud_buffer = hud.render();
+                    log::trace!("RedrawRequested: compositing HUD ({} bytes)", hud_buffer.len());
                     unsafe { compositor.draw_hud(&gl, hud_buffer); }
                 }
 
                 engine.present();
+                log::trace!("RedrawRequested: present complete");
 
                 // Debug: dump the composited framebuffer to a PNG for vision-based
                 // verification. Gated on HODEI_SCREENSHOT=1; throttled to 1Hz to
@@ -1590,6 +1716,7 @@ impl ApplicationHandler<UserEvent> for App {
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::ServoTick => {
+                log::trace!("UserEvent::ServoTick");
                 if let Some(engine) = &mut self.engine {
                     engine.spin();
                 }

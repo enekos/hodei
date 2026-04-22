@@ -19,11 +19,13 @@ pub struct BspLayout {
 
 impl BspLayout {
     pub fn new(viewport: Rect) -> Self {
+        log::debug!("BspLayout::new: viewport={:?}", viewport);
         Self { root: None, viewport, focused: None }
     }
 
     pub fn add_first_view(&mut self, view_id: ViewId) {
         assert!(self.root.is_none(), "add_first_view called on non-empty layout");
+        log::info!("BspLayout::add_first_view: view_id={:?}", view_id);
         self.root = Some(Node::Leaf { view_id });
         self.focused = Some(view_id);
     }
@@ -33,6 +35,7 @@ impl BspLayout {
         if let Some(ref root) = self.root {
             Self::resolve_node(root, self.viewport, &mut result);
         }
+        log::trace!("BspLayout::resolve: {} tiles", result.len());
         result
     }
 
@@ -71,10 +74,12 @@ impl BspLayout {
     }
 
     pub fn set_focused(&mut self, view_id: ViewId) {
+        log::debug!("BspLayout::set_focused: {:?}", view_id);
         self.focused = Some(view_id);
     }
 
     pub fn set_viewport(&mut self, viewport: Rect) {
+        log::debug!("BspLayout::set_viewport: {:?}", viewport);
         self.viewport = viewport;
     }
 
@@ -83,10 +88,14 @@ impl BspLayout {
     }
 
     pub fn split(&mut self, target: ViewId, dir: SplitDirection, new_id: ViewId) {
+        log::info!("BspLayout::split: target={:?} direction={:?} new_id={:?}", target, dir, new_id);
         if let Some(ref mut root) = self.root {
             Self::split_node(root, target, dir, new_id);
+            self.focused = Some(new_id);
+            log::info!("BspLayout::split: done, focused set to {:?}", new_id);
+        } else {
+            log::warn!("BspLayout::split: root is empty, cannot split");
         }
-        self.focused = Some(new_id);
     }
 
     fn split_node(node: &mut Node, target: ViewId, dir: SplitDirection, new_id: ViewId) -> bool {
@@ -111,9 +120,11 @@ impl BspLayout {
     }
 
     pub fn close(&mut self, target: ViewId) {
+        log::info!("BspLayout::close: target={:?}", target);
         if let Some(ref mut root) = self.root {
             match root {
                 Node::Leaf { view_id } if *view_id == target => {
+                    log::debug!("BspLayout::close: closing sole leaf");
                     self.root = None;
                     self.focused = None;
                     return;
@@ -126,7 +137,9 @@ impl BspLayout {
         }
         // Update focus if we closed the focused view
         if self.focused == Some(target) {
-            self.focused = self.first_leaf();
+            let new_focus = self.first_leaf();
+            log::debug!("BspLayout::close: closed focused view, new focus={:?}", new_focus);
+            self.focused = new_focus;
         }
     }
 
@@ -165,6 +178,7 @@ impl BspLayout {
     }
 
     pub fn focus_neighbor(&self, from: ViewId, dir: Direction) -> Option<ViewId> {
+        log::trace!("BspLayout::focus_neighbor: from={:?} dir={:?}", from, dir);
         let resolved = self.resolve();
         let current = resolved.iter().find(|(id, _)| *id == from)?;
         let current_rect = current.1;
@@ -195,10 +209,13 @@ impl BspLayout {
                 best = Some((*id, dist));
             }
         }
-        best.map(|(id, _)| id)
+        let result = best.map(|(id, _)| id);
+        log::trace!("BspLayout::focus_neighbor: from={:?} dir={:?} result={:?}", from, dir, result);
+        result
     }
 
     pub fn resize_split(&mut self, target: ViewId, delta: f32) {
+        log::trace!("BspLayout::resize_split: target={:?} delta={}", target, delta);
         if let Some(ref mut root) = self.root {
             Self::resize_node(root, target, delta);
         }
@@ -234,6 +251,7 @@ impl BspLayout {
     }
 
     pub fn reset_splits(&mut self) {
+        log::debug!("BspLayout::reset_splits");
         if let Some(ref mut root) = self.root {
             Self::reset_node(root);
         }
@@ -251,6 +269,7 @@ impl BspLayout {
     }
 
     pub fn swap_tiles(&mut self, a: ViewId, b: ViewId) {
+        log::info!("BspLayout::swap_tiles: a={:?} b={:?}", a, b);
         if let Some(ref mut root) = self.root {
             Self::swap_node(root, a, b);
         }
@@ -278,12 +297,14 @@ impl BspLayout {
         if positions.is_empty() {
             return None;
         }
-        if let Some(idx) = positions.iter().position(|&id| id == current) {
+        let result = if let Some(idx) = positions.iter().position(|&id| id == current) {
             let next_idx = (idx + 1) % positions.len();
             Some(positions[next_idx])
         } else {
             positions.first().copied()
-        }
+        };
+        log::trace!("BspLayout::next_focus: current={:?} result={:?}", current, result);
+        result
     }
 
     pub fn prev_focus(&self, current: ViewId) -> Option<ViewId> {
@@ -292,12 +313,14 @@ impl BspLayout {
         if positions.is_empty() {
             return None;
         }
-        if let Some(idx) = positions.iter().position(|&id| id == current) {
+        let result = if let Some(idx) = positions.iter().position(|&id| id == current) {
             let prev_idx = if idx == 0 { positions.len() - 1 } else { idx - 1 };
             Some(positions[prev_idx])
         } else {
             positions.first().copied()
-        }
+        };
+        log::trace!("BspLayout::prev_focus: current={:?} result={:?}", current, result);
+        result
     }
 
     /// Serialize to BFS-order node rows for SQLite storage.
@@ -331,11 +354,13 @@ impl BspLayout {
                 }
             }
         }
+        log::debug!("BspLayout::serialize: {} rows, focused={:?}", rows.len(), self.focused);
         (rows, self.focused)
     }
 
     /// Deserialize from BFS-order node rows.
     pub fn deserialize(viewport: Rect, rows: &[LayoutNodeRow], focused: Option<ViewId>) -> Self {
+        log::debug!("BspLayout::deserialize: {} rows, focused={:?}", rows.len(), focused);
         if rows.is_empty() {
             return Self { root: None, viewport, focused };
         }

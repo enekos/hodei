@@ -62,6 +62,7 @@ pub struct Hud {
 impl Hud {
     /// Must be called exactly once, before any Slint operations.
     pub fn new(width: u32, height: u32) -> Self {
+        log::info!("Hud::new: initializing software renderer {}x{}", width, height);
         let sw_window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
         sw_window.set_size(slint::PhysicalSize::new(width, height));
 
@@ -70,6 +71,7 @@ impl Hud {
             start: std::time::Instant::now(),
         }))
         .expect("set_platform must be called once");
+        log::debug!("Hud::new: Slint platform set");
 
         // Register the bundled Lucide icon font so `font-family: "lucide"`
         // resolves inside hud.slint. The Slint platform must exist before this
@@ -79,6 +81,7 @@ impl Hud {
         let hud_instance = HudWindow::new().unwrap();
         hud_instance.show().unwrap();
         let buffer = vec![Rgba8Pixel::default(); (width * height) as usize];
+        log::info!("Hud::new: initialized with buffer size {} bytes", buffer.len() * 4);
 
         Self {
             window: sw_window,
@@ -95,6 +98,7 @@ impl Hud {
     /// (0,0,0,255); we convert those to fully transparent so the GL compositor
     /// can blend the HUD over the page content underneath.
     pub fn render(&mut self) -> &[u8] {
+        log::trace!("Hud::render: clearing {} pixels", self.buffer.len());
         self.buffer.fill(Rgba8Pixel::default());
 
         self.window.request_redraw();
@@ -105,11 +109,18 @@ impl Hud {
         // Work around Slint's software renderer writing opaque black where the
         // Window background is transparent. Our HUD uses no pure-black content,
         // so (0,0,0,255) is unambiguously "background".
+        let mut transparent_count = 0;
         for p in self.buffer.iter_mut() {
             if p.r == 0 && p.g == 0 && p.b == 0 && p.a == 255 {
                 p.a = 0;
+                transparent_count += 1;
             }
         }
+        log::trace!(
+            "Hud::render: {} total pixels, {} transparent (background) pixels",
+            self.buffer.len(),
+            transparent_count
+        );
 
         unsafe {
             std::slice::from_raw_parts(
@@ -120,34 +131,42 @@ impl Hud {
     }
 
     pub fn set_mode_text(&self, mode: &str) {
+        log::trace!("Hud::set_mode_text: {}", mode);
         self.hud_instance.set_mode_text(SharedString::from(mode));
     }
 
     pub fn set_url_text(&self, url: &str) {
+        log::trace!("Hud::set_url_text: {}", url);
         self.hud_instance.set_url_text(SharedString::from(url));
     }
 
     pub fn set_title_text(&self, title: &str) {
+        log::trace!("Hud::set_title_text: {}", title);
         self.hud_instance.set_title_text(SharedString::from(title));
     }
 
     pub fn set_command_text(&self, text: &str) {
+        log::trace!("Hud::set_command_text: {}", text);
         self.hud_instance.set_command_text(SharedString::from(text));
     }
 
     pub fn set_command_visible(&self, visible: bool) {
+        log::trace!("Hud::set_command_visible: {}", visible);
         self.hud_instance.set_command_visible(visible);
     }
 
     pub fn set_tile_count(&self, count: i32) {
+        log::trace!("Hud::set_tile_count: {}", count);
         self.hud_instance.set_tile_count(count);
     }
 
     pub fn set_focused_index(&self, index: i32) {
+        log::trace!("Hud::set_focused_index: {}", index);
         self.hud_instance.set_focused_index(index);
     }
 
     pub fn set_hints(&self, hints: Vec<(String, f32, f32, bool)>) {
+        log::trace!("Hud::set_hints: {} hints", hints.len());
         let model: Vec<HintLabel> = hints
             .into_iter()
             .map(|(label, x, y, active)| HintLabel {
@@ -162,6 +181,7 @@ impl Hud {
     }
 
     pub fn set_suggestions(&self, suggestions: Vec<(String, String, bool)>) {
+        log::trace!("Hud::set_suggestions: {} suggestions", suggestions.len());
         let model: Vec<SuggestionItem> = suggestions
             .into_iter()
             .map(|(title, url, selected)| SuggestionItem {
@@ -175,64 +195,79 @@ impl Hud {
     }
 
     pub fn set_suggestions_visible(&self, visible: bool) {
+        log::trace!("Hud::set_suggestions_visible: {}", visible);
         self.hud_instance.set_suggestions_visible(visible);
     }
 
     pub fn set_search_text(&self, text: &str) {
+        log::trace!("Hud::set_search_text: {}", text);
         self.hud_instance.set_search_text(SharedString::from(text));
     }
 
     pub fn set_search_visible(&self, visible: bool) {
+        log::trace!("Hud::set_search_visible: {}", visible);
         self.hud_instance.set_search_visible(visible);
     }
 
     pub fn set_search_info(&self, info: &str) {
+        log::trace!("Hud::set_search_info: {}", info);
         self.hud_instance.set_search_info(SharedString::from(info));
     }
 
     pub fn set_status_text(&self, text: &str) {
+        log::trace!("Hud::set_status_text: {}", text);
         self.hud_instance.set_status_text(SharedString::from(text));
     }
 
     pub fn set_shortcuts_visible(&self, visible: bool) {
+        log::trace!("Hud::set_shortcuts_visible: {}", visible);
         self.hud_instance.set_shortcuts_visible(visible);
     }
 
     pub fn set_loading(&self, v: bool) {
+        log::trace!("Hud::set_loading: {}", v);
         self.hud_instance.set_loading(v);
     }
 
     pub fn set_secure(&self, v: bool) {
+        log::trace!("Hud::set_secure: {}", v);
         self.hud_instance.set_secure(v);
     }
 
     pub fn set_insecure(&self, v: bool) {
+        log::trace!("Hud::set_insecure: {}", v);
         self.hud_instance.set_insecure(v);
     }
 
     pub fn set_bookmarked(&self, v: bool) {
+        log::trace!("Hud::set_bookmarked: {}", v);
         self.hud_instance.set_bookmarked(v);
     }
 
     pub fn set_zoom(&self, zoom: f32) {
+        log::trace!("Hud::set_zoom: {}", zoom);
         self.hud_instance.set_zoom(zoom);
     }
 
     pub fn set_can_back(&self, v: bool) {
+        log::trace!("Hud::set_can_back: {}", v);
         self.hud_instance.set_can_back(v);
     }
 
     pub fn set_can_forward(&self, v: bool) {
+        log::trace!("Hud::set_can_forward: {}", v);
         self.hud_instance.set_can_forward(v);
     }
 
     pub fn clear_hints(&self) {
+        log::trace!("Hud::clear_hints");
         let empty: Vec<HintLabel> = vec![];
         let rc = Rc::new(VecModel::from(empty));
         self.hud_instance.set_hints(ModelRc::from(rc));
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
+        log::info!("Hud::resize: {}x{} -> {}x{}", self.width, self.height, width, height);
         self.width = width;
         self.height = height;
         self.buffer.resize((width * height) as usize, Rgba8Pixel::default());
@@ -240,6 +275,7 @@ impl Hud {
     }
 
     pub fn request_redraw(&self) {
+        log::trace!("Hud::request_redraw");
         self.window.request_redraw();
     }
 
@@ -270,7 +306,10 @@ fn find_lucide_font() -> Option<std::path::PathBuf> {
     }
     candidates.push(std::path::PathBuf::from("assets/fonts/lucide.ttf"));
 
-    candidates.into_iter().find(|p| p.exists())
+    let candidate_count = candidates.len();
+    let found = candidates.into_iter().find(|p| p.exists());
+    log::debug!("find_lucide_font: searched {} candidates, found={:?}", candidate_count, found);
+    found
 }
 
 fn register_lucide_font() {

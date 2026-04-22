@@ -34,6 +34,7 @@ impl Compositor {
     /// # Safety
     /// Must be called with a valid, current GL context.
     pub unsafe fn new(gl: &glow::Context, width: u32, height: u32) -> Self {
+        log::info!("Compositor::new: creating GL resources for {}x{}", width, height);
         let program = Self::create_program(gl);
         let quad_vao = Self::create_quad_vao(gl);
         let hud_texture = Self::create_empty_texture(gl, width as i32, height as i32);
@@ -43,6 +44,7 @@ impl Compositor {
         gl.bind_texture(glow::TEXTURE_2D, None);
         gl.use_program(None);
 
+        log::info!("Compositor::new: GL resources created successfully");
         Self {
             program,
             quad_vao,
@@ -59,10 +61,21 @@ impl Compositor {
     /// # Safety
     /// Must be called with a valid, current GL context and the window FBO bound.
     pub unsafe fn draw_hud(&self, gl: &glow::Context, hud_buffer: &[u8]) {
-        debug_assert_eq!(
+        let expected = (self.window_width * self.window_height * 4) as usize;
+        if hud_buffer.len() != expected {
+            log::error!(
+                "Compositor::draw_hud: HUD buffer size mismatch! expected={} got={} ({}x{})",
+                expected,
+                hud_buffer.len(),
+                self.window_width,
+                self.window_height
+            );
+        }
+        log::trace!(
+            "Compositor::draw_hud: uploading {} bytes for {}x{} HUD",
             hud_buffer.len(),
-            (self.window_width * self.window_height * 4) as usize,
-            "HUD buffer size mismatch"
+            self.window_width,
+            self.window_height
         );
 
         // Reset GL state that Servo's renderer may have left on.
@@ -89,30 +102,36 @@ impl Compositor {
             glow::UNSIGNED_BYTE,
             glow::PixelUnpackData::Slice(Some(hud_buffer)),
         );
+        log::trace!("Compositor::draw_hud: texture uploaded");
 
         // Slint outputs premultiplied-alpha RGBA.
         gl.enable(glow::BLEND);
         gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
 
         gl.bind_vertex_array(Some(self.quad_vao));
+        log::trace!("Compositor::draw_hud: drawing 6 vertices (2 triangles)");
         gl.draw_arrays(glow::TRIANGLES, 0, 6);
 
         gl.bind_vertex_array(None);
         gl.disable(glow::BLEND);
         gl.bind_texture(glow::TEXTURE_2D, None);
         gl.use_program(None);
+        log::trace!("Compositor::draw_hud: draw complete, GL state reset");
     }
 
     /// # Safety
     /// Requires valid GL context.
     pub unsafe fn resize(&mut self, gl: &glow::Context, width: u32, height: u32) {
+        log::info!("Compositor::resize: {}x{} -> {}x{}", self.window_width, self.window_height, width, height);
         self.window_width = width;
         self.window_height = height;
         gl.delete_texture(self.hud_texture);
         self.hud_texture = Self::create_empty_texture(gl, width as i32, height as i32);
+        log::debug!("Compositor::resize: HUD texture recreated");
     }
 
     unsafe fn create_program(gl: &glow::Context) -> glow::Program {
+        log::debug!("Compositor::create_program: compiling shaders");
         let program = gl.create_program().expect("create program");
         let shaders = [
             (glow::VERTEX_SHADER, VERTEX_SHADER),
@@ -125,7 +144,9 @@ impl Compositor {
                 gl.shader_source(shader, src);
                 gl.compile_shader(shader);
                 if !gl.get_shader_compile_status(shader) {
-                    panic!("Shader compile error: {}", gl.get_shader_info_log(shader));
+                    let log = gl.get_shader_info_log(shader);
+                    log::error!("Shader compile error: {}", log);
+                    panic!("Shader compile error: {}", log);
                 }
                 gl.attach_shader(program, shader);
                 shader
@@ -133,11 +154,14 @@ impl Compositor {
             .collect();
         gl.link_program(program);
         if !gl.get_program_link_status(program) {
-            panic!("Program link error: {}", gl.get_program_info_log(program));
+            let log = gl.get_program_info_log(program);
+            log::error!("Program link error: {}", log);
+            panic!("Program link error: {}", log);
         }
         for s in compiled {
             gl.delete_shader(s);
         }
+        log::debug!("Compositor::create_program: shader program linked successfully");
         // Bind the sampler once: the shader always uses TEXTURE0.
         gl.use_program(Some(program));
         if let Some(loc) = gl.get_uniform_location(program, "u_texture") {
@@ -148,6 +172,7 @@ impl Compositor {
     }
 
     unsafe fn create_quad_vao(gl: &glow::Context) -> glow::VertexArray {
+        log::debug!("Compositor::create_quad_vao: creating fullscreen quad VAO/VBO");
         #[rustfmt::skip]
         let vertices: &[f32] = &[
             // pos       uv
@@ -173,10 +198,12 @@ impl Compositor {
         gl.enable_vertex_attrib_array(1);
         gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, stride, 8);
         gl.bind_vertex_array(None);
+        log::debug!("Compositor::create_quad_vao: VAO={:?} VBO={:?} stride={}", vao, vbo, stride);
         vao
     }
 
     unsafe fn create_empty_texture(gl: &glow::Context, width: i32, height: i32) -> glow::Texture {
+        log::debug!("Compositor::create_empty_texture: {}x{}", width, height);
         let texture = gl.create_texture().expect("create texture");
         gl.bind_texture(glow::TEXTURE_2D, Some(texture));
         gl.tex_image_2d(
@@ -190,6 +217,7 @@ impl Compositor {
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
         gl.bind_texture(glow::TEXTURE_2D, None);
+        log::debug!("Compositor::create_empty_texture: texture={:?}", texture);
         texture
     }
 }

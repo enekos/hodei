@@ -8,6 +8,7 @@ pub struct HodeiServoDelegate {
 
 impl HodeiServoDelegate {
     pub fn new(metadata_tx: Sender<MetadataEvent>) -> Self {
+        log::debug!("HodeiServoDelegate::new");
         Self { metadata_tx }
     }
 }
@@ -36,12 +37,14 @@ pub struct HodeiWebViewDelegate {
 
 impl HodeiWebViewDelegate {
     pub fn new(view_id: ViewId, metadata_tx: Sender<MetadataEvent>) -> Self {
+        log::debug!("HodeiWebViewDelegate::new: view_id={:?}", view_id);
         Self { view_id, metadata_tx }
     }
 }
 
 impl servo::WebViewDelegate for HodeiWebViewDelegate {
     fn notify_new_frame_ready(&self, _webview: servo::WebView) {
+        log::trace!("notify_new_frame_ready: view_id={:?}", self.view_id);
         let _ = self.metadata_tx.send(MetadataEvent::FrameReady { view_id: self.view_id });
     }
 
@@ -64,6 +67,7 @@ impl servo::WebViewDelegate for HodeiWebViewDelegate {
     }
 
     fn notify_status_text_changed(&self, _webview: servo::WebView, status: Option<String>) {
+        log::trace!("Status text changed for {:?}: {:?}", self.view_id, status);
         let _ = self.metadata_tx.send(MetadataEvent::StatusTextChanged {
             view_id: self.view_id,
             text: status,
@@ -76,6 +80,7 @@ impl servo::WebViewDelegate for HodeiWebViewDelegate {
             servo::LoadStatus::HeadParsed => TileLoadStatus::HeadParsed,
             servo::LoadStatus::Complete => TileLoadStatus::Complete,
         };
+        log::debug!("Load status changed for {:?}: {:?}", self.view_id, mapped);
         let _ = self.metadata_tx.send(MetadataEvent::LoadStatusChanged {
             view_id: self.view_id,
             status: mapped,
@@ -90,6 +95,14 @@ impl servo::WebViewDelegate for HodeiWebViewDelegate {
     ) {
         let can_back = current > 0;
         let can_forward = current + 1 < entries.len();
+        log::debug!(
+            "History changed for {:?}: total_entries={} current={} can_back={} can_forward={}",
+            self.view_id,
+            entries.len(),
+            current,
+            can_back,
+            can_forward
+        );
         let _ = self.metadata_tx.send(MetadataEvent::HistoryChanged {
             view_id: self.view_id,
             can_back,

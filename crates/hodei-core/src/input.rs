@@ -155,6 +155,7 @@ pub struct InputRouter {
 
 impl InputRouter {
     pub fn new() -> Self {
+        log::debug!("InputRouter::new: initializing with default bindings");
         Self {
             mode: Mode::Normal,
             normal_bindings: Self::default_bindings(),
@@ -162,13 +163,19 @@ impl InputRouter {
     }
 
     pub fn with_overrides(overrides: &HashMap<String, String>) -> Self {
+        log::info!("InputRouter::with_overrides: applying {} custom bindings", overrides.len());
         let mut bindings = Self::default_bindings();
         for (action_name, key_str) in overrides {
             if let Some(combo) = KeyCombo::parse(key_str) {
                 if let Some(action) = Self::action_from_name(action_name) {
+                    log::debug!("InputRouter::with_overrides: binding '{}' -> {:?}", key_str, action);
                     bindings.retain(|_, v| v != &action);
                     bindings.insert(combo, action);
+                } else {
+                    log::warn!("InputRouter::with_overrides: unknown action '{}'", action_name);
                 }
+            } else {
+                log::warn!("InputRouter::with_overrides: failed to parse key combo '{}'", key_str);
             }
         }
         Self {
@@ -228,6 +235,7 @@ impl InputRouter {
             map.insert(KeyCombo::new(CoreKey::Char(c), true, false), Action::JumpQuickmark(i));
             map.insert(KeyCombo::new(CoreKey::Char(c), false, true), Action::SetQuickmark(i));
         }
+        log::debug!("InputRouter::default_bindings: {} bindings registered", map.len());
         map
     }
 
@@ -279,19 +287,28 @@ impl InputRouter {
 
     pub fn handle(&mut self, event: &CoreKeyEvent) -> Vec<Action> {
         if event.state != KeyState::Pressed {
+            log::trace!("InputRouter::handle: ignoring released key {:?}", event.key);
             return vec![];
         }
-        match &self.mode {
+        let actions = match &self.mode {
             Mode::Normal => self.handle_normal(event),
             Mode::Insert => self.handle_insert(event),
             Mode::Command { .. } => self.handle_command(event),
             Mode::Hint { .. } => self.handle_hint(event),
             Mode::Search { .. } => self.handle_search(event),
-        }
+        };
+        log::debug!(
+            "InputRouter::handle: mode={:?} key={:?} -> {} action(s)",
+            self.mode,
+            event.key,
+            actions.len()
+        );
+        actions
     }
 
     /// Called by app after hint elements are fetched from Servo.
     pub fn enter_hint_mode(&mut self, labels: Vec<String>) {
+        log::info!("InputRouter::enter_hint_mode: {} labels", labels.len());
         self.mode = Mode::Hint { filter: String::new(), labels };
     }
 
@@ -299,6 +316,7 @@ impl InputRouter {
         let combo = KeyCombo::from_event(event);
         if let Some(action) = self.normal_bindings.get(&combo) {
             let action = action.clone();
+            log::trace!("InputRouter::handle_normal: combo={:?} -> action={:?}", combo, action);
             match &action {
                 Action::EnterInsert => self.mode = Mode::Insert,
                 Action::EnterCommand => self.mode = Mode::Command { buffer: String::new() },
@@ -307,21 +325,25 @@ impl InputRouter {
             }
             vec![action]
         } else {
+            log::trace!("InputRouter::handle_normal: combo={:?} -> no binding", combo);
             vec![]
         }
     }
 
     fn handle_insert(&mut self, event: &CoreKeyEvent) -> Vec<Action> {
         if event.key == CoreKey::Escape {
+            log::debug!("InputRouter::handle_insert: Escape -> ExitToNormal");
             self.mode = Mode::Normal;
             return vec![Action::ExitToNormal];
         }
+        log::trace!("InputRouter::handle_insert: forwarding {:?} to servo", event.key);
         vec![Action::ForwardToServo(event.clone())]
     }
 
     fn handle_command(&mut self, event: &CoreKeyEvent) -> Vec<Action> {
         match event.key {
             CoreKey::Escape => {
+                log::debug!("InputRouter::handle_command: Escape -> ExitToNormal");
                 self.mode = Mode::Normal;
                 vec![Action::ExitToNormal]
             }
@@ -329,24 +351,39 @@ impl InputRouter {
                 let buffer = if let Mode::Command { buffer } = &self.mode {
                     buffer.clone()
                 } else {
-                    unreachable!()
+                    String::new()
                 };
+                log::debug!("InputRouter::handle_command: Enter -> execute '{}'", buffer);
                 self.mode = Mode::Normal;
                 self.parse_command(&buffer)
             }
             CoreKey::Backspace => {
                 if let Mode::Command { buffer } = &mut self.mode {
                     buffer.pop();
+                    log::trace!("InputRouter::handle_command: Backspace -> buffer='{}'", buffer);
                 }
                 vec![Action::CommandBufferChanged]
             }
-            CoreKey::Char('n') if event.modifiers.ctrl => vec![Action::SuggestionNext],
-            CoreKey::Char('p') if event.modifiers.ctrl => vec![Action::SuggestionPrev],
-            CoreKey::Down => vec![Action::SuggestionNext],
-            CoreKey::Up => vec![Action::SuggestionPrev],
+            CoreKey::Char('n') if event.modifiers.ctrl => {
+                log::trace!("InputRouter::handle_command: Ctrl+n -> SuggestionNext");
+                vec![Action::SuggestionNext]
+            }
+            CoreKey::Char('p') if event.modifiers.ctrl => {
+                log::trace!("InputRouter::handle_command: Ctrl+p -> SuggestionPrev");
+                vec![Action::SuggestionPrev]
+            }
+            CoreKey::Down => {
+                log::trace!("InputRouter::handle_command: Down -> SuggestionNext");
+                vec![Action::SuggestionNext]
+            }
+            CoreKey::Up => {
+                log::trace!("InputRouter::handle_command: Up -> SuggestionPrev");
+                vec![Action::SuggestionPrev]
+            }
             CoreKey::Char(c) => {
                 if let Mode::Command { buffer } = &mut self.mode {
                     buffer.push(c);
+                    log::trace!("InputRouter::handle_command: Char('{}') -> buffer='{}'", c, buffer);
                 }
                 vec![Action::CommandBufferChanged]
             }
@@ -357,6 +394,7 @@ impl InputRouter {
     fn handle_hint(&mut self, event: &CoreKeyEvent) -> Vec<Action> {
         match event.key {
             CoreKey::Escape => {
+                log::debug!("InputRouter::handle_hint: Escape -> ExitToNormal");
                 self.mode = Mode::Normal;
                 vec![Action::ExitToNormal]
             }
@@ -371,15 +409,19 @@ impl InputRouter {
                         .collect();
                     (f, matching)
                 } else {
-                    unreachable!()
+                    (String::new(), vec![])
                 };
+
+                log::trace!("InputRouter::handle_hint: Char('{}') filter='{}' matches={}", c, new_filter, matching.len());
 
                 if matching.len() == 1 {
                     let label = matching[0].clone();
+                    log::debug!("InputRouter::handle_hint: activated hint '{}'", label);
                     self.mode = Mode::Normal;
                     vec![Action::ActivateHint(label)]
                 } else if matching.is_empty() {
                     // No match — cancel hint mode
+                    log::debug!("InputRouter::handle_hint: no matches -> cancel");
                     self.mode = Mode::Normal;
                     vec![Action::ExitToNormal]
                 } else {
@@ -396,6 +438,7 @@ impl InputRouter {
     fn handle_search(&mut self, event: &CoreKeyEvent) -> Vec<Action> {
         match event.key {
             CoreKey::Escape => {
+                log::debug!("InputRouter::handle_search: Escape -> SearchClear");
                 self.mode = Mode::Normal;
                 vec![Action::SearchClear]
             }
@@ -405,6 +448,7 @@ impl InputRouter {
                 } else {
                     String::new()
                 };
+                log::debug!("InputRouter::handle_search: Enter -> query='{}'", query);
                 self.mode = Mode::Normal;
                 vec![Action::SearchQueryChanged(query)]
             }
@@ -412,6 +456,7 @@ impl InputRouter {
                 if let Mode::Search { query } = &mut self.mode {
                     query.pop();
                     let q = query.clone();
+                    log::trace!("InputRouter::handle_search: Backspace -> query='{}'", q);
                     return vec![Action::SearchQueryChanged(q)];
                 }
                 vec![]
@@ -420,6 +465,7 @@ impl InputRouter {
                 if let Mode::Search { query } = &mut self.mode {
                     query.push(c);
                     let q = query.clone();
+                    log::trace!("InputRouter::handle_search: Char('{}') -> query='{}'", c, q);
                     return vec![Action::SearchQueryChanged(q)];
                 }
                 vec![]
@@ -430,7 +476,7 @@ impl InputRouter {
 
     fn parse_command(&self, cmd: &str) -> Vec<Action> {
         let parts: Vec<&str> = cmd.trim().splitn(2, ' ').collect();
-        match parts.first().copied() {
+        let action = match parts.first().copied() {
             Some("open" | "o") => {
                 if let Some(url) = parts.get(1) {
                     vec![Action::Navigate(url.to_string())]
@@ -485,7 +531,9 @@ impl InputRouter {
             }
             Some("devtools") => vec![Action::DevToolsShow],
             _ => vec![],
-        }
+        };
+        log::debug!("InputRouter::parse_command: '{}' -> {:?}", cmd, action);
+        action
     }
 }
 

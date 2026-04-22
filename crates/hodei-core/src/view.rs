@@ -16,6 +16,7 @@ pub struct ViewManager {
 
 impl ViewManager {
     pub fn new() -> Self {
+        log::debug!("ViewManager::new");
         Self {
             views: HashMap::new(),
             next_id: 1,
@@ -29,6 +30,7 @@ impl ViewManager {
     pub fn create(&mut self, url: &str) -> ViewId {
         let id = ViewId(self.next_id);
         self.next_id += 1;
+        log::info!("ViewManager::create: id={:?} url={} (total views: {})", id, url, self.views.len() + 1);
         self.views.insert(id, View {
             id,
             url: url.to_string(),
@@ -40,6 +42,7 @@ impl ViewManager {
     }
 
     pub fn create_with_id(&mut self, id: ViewId, url: &str) {
+        log::info!("ViewManager::create_with_id: id={:?} url={}", id, url);
         self.views.insert(id, View {
             id,
             url: url.to_string(),
@@ -53,6 +56,7 @@ impl ViewManager {
     }
 
     pub fn remove(&mut self, id: ViewId) -> Option<View> {
+        log::info!("ViewManager::remove: id={:?} (remaining will be: {})", id, self.views.len().saturating_sub(1));
         self.views.remove(&id)
     }
 
@@ -65,23 +69,29 @@ impl ViewManager {
     }
 
     pub fn mark_dirty(&mut self, id: ViewId) {
+        log::trace!("ViewManager::mark_dirty: id={:?}", id);
         if let Some(v) = self.views.get_mut(&id) {
             v.dirty = true;
         }
     }
 
     pub fn clear_dirty(&mut self, id: ViewId) {
+        log::trace!("ViewManager::clear_dirty: id={:?}", id);
         if let Some(v) = self.views.get_mut(&id) {
             v.dirty = false;
         }
     }
 
     pub fn dirty_views(&self) -> Vec<ViewId> {
-        self.views.values().filter(|v| v.dirty).map(|v| v.id).collect()
+        let ids: Vec<ViewId> = self.views.values().filter(|v| v.dirty).map(|v| v.id).collect();
+        log::trace!("ViewManager::dirty_views: count={}", ids.len());
+        ids
     }
 
     pub fn all_views(&self) -> Vec<ViewId> {
-        self.views.keys().copied().collect()
+        let ids: Vec<ViewId> = self.views.keys().copied().collect();
+        log::trace!("ViewManager::all_views: count={}", ids.len());
+        ids
     }
 
     pub fn count(&self) -> usize {

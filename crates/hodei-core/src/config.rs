@@ -94,20 +94,29 @@ impl Default for DevToolsConfig {
 
 impl Config {
     pub fn load(path: &Path) -> Self {
+        log::info!("Config::load: attempting to load from {}", path.display());
         match std::fs::read_to_string(path) {
             Ok(contents) => match toml::from_str(&contents) {
-                Ok(config) => config,
+                Ok(config) => {
+                    log::info!("Config::load: loaded successfully from {}", path.display());
+                    config
+                }
                 Err(e) => {
-                    log::warn!("Failed to parse config {}: {}", path.display(), e);
+                    log::warn!("Config::load: failed to parse {}: {}. Using defaults.", path.display(), e);
                     Config::default()
                 }
             },
-            Err(_) => Config::default(),
+            Err(e) => {
+                log::info!("Config::load: no config file at {} ({}). Using defaults.", path.display(), e);
+                Config::default()
+            }
         }
     }
 
     pub fn search_url(&self, query: &str) -> String {
-        self.general.search_engine.replace("{}", query)
+        let url = self.general.search_engine.replace("{}", query);
+        log::trace!("Config::search_url: query='{}' -> url='{}'", query, url);
+        url
     }
 }
 

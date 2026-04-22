@@ -37,6 +37,11 @@ pub fn core_key_to_servo(event: &CoreKeyEvent) -> servo::InputEvent {
         modifiers |= servo::Modifiers::META;
     }
 
+    log::trace!(
+        "core_key_to_servo: key={:?} state={:?} modifiers=ctrl:{} alt:{} shift:{} meta:{}",
+        key, state, event.modifiers.ctrl, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta
+    );
+
     let keyboard_event = servo::KeyboardEvent::new_without_event(
         state,
         key,
@@ -52,6 +57,7 @@ pub fn core_key_to_servo(event: &CoreKeyEvent) -> servo::InputEvent {
 
 /// Generate a click InputEvent at the given coordinates.
 pub fn click_at(x: f32, y: f32) -> servo::InputEvent {
+    log::trace!("click_at: x={} y={}", x, y);
     let point = servo::DevicePoint::new(x as f32, y as f32);
     let webview_point = servo::WebViewPoint::from(point);
     servo::InputEvent::MouseButton(servo::MouseButtonEvent::new(
@@ -65,11 +71,13 @@ pub fn click_at(x: f32, y: f32) -> servo::InputEvent {
 pub fn core_mouse_to_servo(event: &CoreMouseEvent) -> servo::InputEvent {
     match event {
         CoreMouseEvent::Move { x, y } => {
+            log::trace!("core_mouse_to_servo: Move x={} y={}", x, y);
             let point = servo::DevicePoint::new(*x as f32, *y as f32);
             let webview_point = servo::WebViewPoint::from(point);
             servo::InputEvent::MouseMove(servo::MouseMoveEvent::new(webview_point))
         }
         CoreMouseEvent::Down { x, y, button } => {
+            log::trace!("core_mouse_to_servo: Down x={} y={} button={:?}", x, y, button);
             let point = servo::DevicePoint::new(*x as f32, *y as f32);
             let webview_point = servo::WebViewPoint::from(point);
             let servo_button = mouse_button_to_servo(button);
@@ -80,6 +88,7 @@ pub fn core_mouse_to_servo(event: &CoreMouseEvent) -> servo::InputEvent {
             ))
         }
         CoreMouseEvent::Up { x, y, button } => {
+            log::trace!("core_mouse_to_servo: Up x={} y={} button={:?}", x, y, button);
             let point = servo::DevicePoint::new(*x as f32, *y as f32);
             let webview_point = servo::WebViewPoint::from(point);
             let servo_button = mouse_button_to_servo(button);
@@ -90,6 +99,7 @@ pub fn core_mouse_to_servo(event: &CoreMouseEvent) -> servo::InputEvent {
             ))
         }
         CoreMouseEvent::Scroll { x, y, delta_x, delta_y } => {
+            log::trace!("core_mouse_to_servo: Scroll x={} y={} delta_x={} delta_y={}", x, y, delta_x, delta_y);
             let point = servo::DevicePoint::new(*x as f32, *y as f32);
             let webview_point = servo::WebViewPoint::from(point);
             servo::InputEvent::Wheel(servo::WheelEvent::new(

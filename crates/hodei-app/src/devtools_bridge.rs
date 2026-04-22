@@ -12,6 +12,7 @@ pub struct DevToolsBridge {
 
 impl DevToolsBridge {
     pub fn new(tcp_port: u16, ws_port: u16) -> Self {
+        log::debug!("DevToolsBridge::new: tcp_port={} ws_port={}", tcp_port, ws_port);
         Self { tcp_port, ws_port, running: false }
     }
 
@@ -24,10 +25,13 @@ impl DevToolsBridge {
     }
 
     pub fn stop(&mut self) {
+        log::debug!("DevToolsBridge::stop");
         self.running = false;
     }
 
     pub fn ws_url(&self) -> String {
-        format!("ws://127.0.0.1:{}/", self.ws_port)
+        let url = format!("ws://127.0.0.1:{}/", self.ws_port);
+        log::trace!("DevToolsBridge::ws_url: {}", url);
+        url
     }
 }
