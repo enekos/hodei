@@ -3,6 +3,25 @@ use std::rc::Rc;
 use std::sync::Arc;
 use hodei_core::types::ViewId;
 use servo::RenderingContext;
+use glow::HasContext;
+
+/// Drain any pending GL errors. Surfman has a `debug_assert_eq!(gl.get_error(), NO_ERROR)`
+/// after binding a new IOSurface-backed texture on macOS; stray errors left by Servo's
+/// paint or the HUD compositor trip it during resize. Drain before any surfman operation
+/// that we know performs that assertion.
+fn drain_gl_errors(gl: &glow::Context) {
+    unsafe {
+        let mut n = 0;
+        loop {
+            let err = gl.get_error();
+            if err == glow::NO_ERROR || n > 16 {
+                break;
+            }
+            log::debug!("drain_gl_errors: cleared pending gl error {:#x}", err);
+            n += 1;
+        }
+    }
+}
 
 /// Manages the WindowRenderingContext and per-tile OffscreenRenderingContexts.
 pub struct RenderContextManager {
@@ -60,6 +79,7 @@ impl RenderContextManager {
     pub fn resize_offscreen(&mut self, view_id: ViewId, width: u32, height: u32) {
         log::debug!("RenderContextManager::resize_offscreen: view_id={:?} new_size={}x{}", view_id, width, height);
         if let Some(ctx) = self.offscreen.get(&view_id) {
+            drain_gl_errors(&self.window_ctx.glow_gl_api());
             ctx.resize(dpi::PhysicalSize::new(width, height));
             log::info!("RenderContextManager: resized offscreen context for view {:?} to {}x{}", view_id, width, height);
         } else {
@@ -94,6 +114,7 @@ impl RenderContextManager {
 
     pub fn resize_window(&self, width: u32, height: u32) {
         log::debug!("RenderContextManager::resize_window: new_size={}x{}", width, height);
+        drain_gl_errors(&self.window_ctx.glow_gl_api());
         self.window_ctx.resize(dpi::PhysicalSize::new(width, height));
         log::info!("RenderContextManager: resized window context to {}x{}", width, height);
     }

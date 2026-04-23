@@ -17,7 +17,7 @@ fn save_png(hud: &mut Hud, name: &str) {
 }
 
 fn main() {
-    let mut hud = Hud::new(1280, 720);
+    let mut hud = Hud::new(1280, 720, 1.0);
 
     // Baseline NORMAL mode, https, bookmarked, zoomed 125%
     hud.set_mode_text("NORMAL");
@@ -53,4 +53,34 @@ fn main() {
     hud.set_command_visible(true);
     hud.set_command_text("open serv");
     save_png(&mut hud, "command");
+
+    // COMMAND mode with suggestions
+    hud.set_suggestions(vec![
+        ("Servo — parallel browser engine".to_string(), "https://servo.org/".to_string(), true),
+        ("Servo/servo GitHub".to_string(), "https://github.com/servo/servo".to_string(), false),
+        ("ServoShell Examples".to_string(), "https://servo.org/shell".to_string(), false),
+    ]);
+    hud.set_suggestions_visible(true);
+    save_png(&mut hud, "command_with_suggestions");
+
+    // SEARCH mode
+    hud.set_command_visible(false);
+    hud.set_suggestions_visible(false);
+    hud.set_mode_text("SEARCH");
+    hud.set_search_visible(true);
+    hud.set_search_text("lightweight");
+    hud.set_search_info("2/7 matches");
+    save_png(&mut hud, "search");
+
+    // HINT mode with labels overlaid
+    hud.set_search_visible(false);
+    hud.set_mode_text("HINT");
+    hud.set_hints(vec![
+        ("aa".to_string(), 120.0, 140.0, false),
+        ("as".to_string(), 260.0, 200.0, true),
+        ("ad".to_string(), 480.0, 300.0, false),
+        ("af".to_string(), 700.0, 420.0, false),
+        ("ag".to_string(), 940.0, 560.0, false),
+    ]);
+    save_png(&mut hud, "hints");
 }

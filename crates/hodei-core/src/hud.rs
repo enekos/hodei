@@ -57,14 +57,14 @@ pub struct Hud {
     buffer: Vec<Rgba8Pixel>,
     width: u32,
     height: u32,
+    scale_factor: f32,
 }
 
 impl Hud {
     /// Must be called exactly once, before any Slint operations.
-    pub fn new(width: u32, height: u32) -> Self {
-        log::info!("Hud::new: initializing software renderer {}x{}", width, height);
+    pub fn new(width: u32, height: u32, scale_factor: f32) -> Self {
+        log::info!("Hud::new: initializing software renderer {}x{} sf={}", width, height, scale_factor);
         let sw_window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
-        sw_window.set_size(slint::PhysicalSize::new(width, height));
 
         slint::platform::set_platform(Box::new(SlintPlatform {
             window: sw_window.clone(),
@@ -72,6 +72,13 @@ impl Hud {
         }))
         .expect("set_platform must be called once");
         log::debug!("Hud::new: Slint platform set");
+
+        // Propagate scale factor so `28px` in hud.slint renders at 28 logical
+        // pixels (= 28 * scale_factor physical pixels on retina).
+        sw_window.dispatch_event(
+            slint::platform::WindowEvent::ScaleFactorChanged { scale_factor },
+        );
+        sw_window.set_size(slint::PhysicalSize::new(width, height));
 
         // Register the bundled Lucide icon font so `font-family: "lucide"`
         // resolves inside hud.slint. The Slint platform must exist before this
@@ -89,6 +96,7 @@ impl Hud {
             buffer,
             width,
             height,
+            scale_factor,
         }
     }
 
@@ -272,6 +280,23 @@ impl Hud {
         self.height = height;
         self.buffer.resize((width * height) as usize, Rgba8Pixel::default());
         self.window.set_size(slint::PhysicalSize::new(width, height));
+    }
+
+    pub fn set_scale_factor(&mut self, scale_factor: f32) {
+        if (self.scale_factor - scale_factor).abs() < f32::EPSILON {
+            return;
+        }
+        log::info!("Hud::set_scale_factor: {} -> {}", self.scale_factor, scale_factor);
+        self.scale_factor = scale_factor;
+        self.window.dispatch_event(
+            slint::platform::WindowEvent::ScaleFactorChanged { scale_factor },
+        );
+        // Re-apply size so layout recomputes in logical units.
+        self.window.set_size(slint::PhysicalSize::new(self.width, self.height));
+    }
+
+    pub fn scale_factor(&self) -> f32 {
+        self.scale_factor
     }
 
     pub fn request_redraw(&self) {

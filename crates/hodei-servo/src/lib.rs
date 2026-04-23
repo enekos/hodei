@@ -117,6 +117,19 @@ impl Engine {
         self.ctx_manager.resize_window(width, height);
     }
 
+    pub fn set_hidpi_scale_factor(&self, scale_factor: f32) {
+        log::info!(
+            "Engine::set_hidpi_scale_factor: {} (affecting {} tiles)",
+            scale_factor,
+            self.tiles.len()
+        );
+        let scale: euclid::Scale<f32, servo::DeviceIndependentPixel, servo::DevicePixel> =
+            euclid::Scale::new(scale_factor);
+        for handle in self.tiles.values() {
+            handle.webview.set_hidpi_scale_factor(scale);
+        }
+    }
+
     pub fn paint_tile(&self, view_id: ViewId) {
         log::trace!("Engine::paint_tile: view_id={:?}", view_id);
         if let Some(handle) = self.tiles.get(&view_id) {

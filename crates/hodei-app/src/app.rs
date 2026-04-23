@@ -1410,12 +1410,16 @@ impl ApplicationHandler<UserEvent> for App {
             .create_window(
                 WindowAttributes::default()
                     .with_title("Hodei")
-                    .with_inner_size(winit::dpi::PhysicalSize::new(1280u32, 720u32)),
+                    .with_inner_size(winit::dpi::LogicalSize::new(1280u32, 800u32)),
             )
             .expect("Failed to create window");
 
         let size = window.inner_size();
-        log::info!("App::resumed: window created {}x{}", size.width, size.height);
+        let scale_factor = window.scale_factor() as f32;
+        log::info!(
+            "App::resumed: window created {}x{} scale_factor={}",
+            size.width, size.height, scale_factor
+        );
 
         // Initialize Servo engine
         use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -1432,7 +1436,7 @@ impl ApplicationHandler<UserEvent> for App {
         let mut engine = Engine::new(display_handle, window_handle, (size.width, size.height), waker, preferences);
 
         // Initialize HUD
-        let hud = Hud::new(size.width, size.height);
+        let hud = Hud::new(size.width, size.height, scale_factor);
 
         // Initialize layout
         self.layout = BspLayout::new(Rect::new(0.0, 0.0, size.width as f32, size.height as f32));
@@ -1501,6 +1505,10 @@ impl ApplicationHandler<UserEvent> for App {
         for (view_id, rect) in &resolved {
             engine.resize_tile(*view_id, rect.width as u32, rect.height as u32);
         }
+
+        // Tell Servo about the display scale so page content is rendered crisply
+        // on HiDPI displays rather than filling only a fraction of the FBO.
+        engine.set_hidpi_scale_factor(scale_factor);
 
         // Ensure window context is current before creating compositor resources (VAO, shaders).
         // create_tile() above may have switched the active GL context to an offscreen one.
@@ -1626,6 +1634,18 @@ impl ApplicationHandler<UserEvent> for App {
                     delta_x: dx,
                     delta_y: dy,
                 });
+            }
+
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                let sf = scale_factor as f32;
+                log::info!("WindowEvent::ScaleFactorChanged: {}", sf);
+                if let Some(engine) = &self.engine {
+                    engine.set_hidpi_scale_factor(sf);
+                }
+                if let Some(hud) = &mut self.hud {
+                    hud.set_scale_factor(sf);
+                }
+                self.request_redraw();
             }
 
             WindowEvent::Resized(size) => {

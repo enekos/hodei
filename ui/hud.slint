@@ -40,27 +40,28 @@ component IconTile inherits Rectangle {
     in property <bool> dim: false;
     in property <bool> highlight: false;
 
-    width: 44px;
-    height: 26px;
+    width: 52px;
+    height: 30px;
     background: root.highlight ? #2a2a4e : transparent;
-    border-radius: 3px;
+    border-radius: 4px;
 
     HorizontalLayout {
-        padding-left: 4px;
-        padding-right: 4px;
-        spacing: 3px;
+        padding-left: 6px;
+        padding-right: 6px;
+        spacing: 5px;
         alignment: center;
 
         LucideIcon {
             glyph: root.glyph;
             tint: root.dim ? #505060 : root.tint;
-            size: 14px;
-            width: 16px;
+            size: 16px;
+            width: 18px;
         }
         Text {
             text: root.key;
-            color: root.dim ? #505060 : #808090;
-            font-size: 10px;
+            color: root.dim ? #505060 : #9090a0;
+            font-size: 11px;
+            font-weight: 600;
             vertical-alignment: center;
         }
     }
@@ -102,22 +103,32 @@ export component HudWindow inherits Window {
         visible: root.mode-text == "NORMAL";
         y: 0;
         width: parent.width;
-        height: 28px;
-        background: #1a1a2eee;
+        height: 34px;
+        background: #14142090;
+
+        // Bottom divider
+        Rectangle {
+            y: parent.height - 1px;
+            width: parent.width;
+            height: 1px;
+            background: #2a2a3e;
+        }
 
         HorizontalLayout {
-            padding-left: 8px;
-            padding-right: 8px;
-            spacing: 10px;
+            padding-left: 10px;
+            padding-right: 10px;
+            padding-top: 2px;
+            padding-bottom: 2px;
+            spacing: 12px;
             alignment: start;
 
             // Navigation group
             HorizontalLayout {
                 spacing: 2px;
-                IconTile { glyph: "\u{e048}"; key: "H-b"; tint: #7fd4ff; dim: !root.can-back; }       // arrow-left
-                IconTile { glyph: "\u{e049}"; key: "H-f"; tint: #7fd4ff; dim: !root.can-forward; }    // arrow-right
-                IconTile { glyph: "\u{e149}"; key: "r"; tint: #7fd4ff; }                              // rotate-cw
-                IconTile { glyph: "\u{e0f5}"; key: "G"; tint: #7fd4ff; }                              // house
+                IconTile { glyph: "\u{e048}"; key: "⌃b"; tint: #7fd4ff; dim: !root.can-back; }
+                IconTile { glyph: "\u{e049}"; key: "⌃f"; tint: #7fd4ff; dim: !root.can-forward; }
+                IconTile { glyph: "\u{e149}"; key: "r"; tint: #7fd4ff; }
+                IconTile { glyph: "\u{e0f5}"; key: "G"; tint: #7fd4ff; }
             }
 
             Rectangle { width: 1px; background: #2a2a3e; }
@@ -125,10 +136,10 @@ export component HudWindow inherits Window {
             // Tiles group
             HorizontalLayout {
                 spacing: 2px;
-                IconTile { glyph: "\u{e098}"; key: "H-v"; tint: #00ff88; }    // columns-2 (vsplit)
-                IconTile { glyph: "\u{e439}"; key: "H-s"; tint: #00ff88; }    // rows-2 (hsplit)
-                IconTile { glyph: "\u{e1b2}"; key: "q"; tint: #ff6677; }      // x (close)
-                IconTile { glyph: "\u{e24a}"; key: "z"; tint: #00ff88; }      // arrow-left-right (swap)
+                IconTile { glyph: "\u{e098}"; key: "⌃v"; tint: #00ff88; }
+                IconTile { glyph: "\u{e439}"; key: "⌃s"; tint: #00ff88; }
+                IconTile { glyph: "\u{e1b2}"; key: "q"; tint: #ff6677; }
+                IconTile { glyph: "\u{e24a}"; key: "z"; tint: #00ff88; }
             }
 
             Rectangle { width: 1px; background: #2a2a3e; }
@@ -136,33 +147,41 @@ export component HudWindow inherits Window {
             // Tools group
             HorizontalLayout {
                 spacing: 2px;
-                IconTile { glyph: "\u{e180}"; key: "f"; tint: #ff00ff; }      // target (hints)
-                IconTile { glyph: "\u{e151}"; key: "/"; tint: #ffaa00; }      // search
-                IconTile { glyph: "\u{e181}"; key: ":"; tint: #ffff00; }      // terminal (command)
-                IconTile { glyph: "\u{e060}"; key: "B"; tint: #ffdd00; }      // bookmark
+                IconTile { glyph: "\u{e180}"; key: "f"; tint: #ff55ff; }
+                IconTile { glyph: "\u{e151}"; key: "/"; tint: #ffaa00; }
+                IconTile { glyph: "\u{e181}"; key: ":"; tint: #ffff00; }
+                IconTile { glyph: "\u{e060}"; key: "B"; tint: #ffdd00; highlight: root.bookmarked; }
             }
         }
     }
 
     // === Status bar at bottom ===
     Rectangle {
-        y: parent.height - 24px;
+        y: parent.height - 26px;
         width: parent.width;
-        height: 24px;
-        background: #1a1a2eee;
+        height: 26px;
+        background: #14142090;
+
+        // Top divider
+        Rectangle {
+            y: 0;
+            width: parent.width;
+            height: 1px;
+            background: #2a2a3e;
+        }
 
         HorizontalLayout {
-            padding-left: 8px;
-            padding-right: 8px;
-            spacing: 6px;
+            padding-left: 10px;
+            padding-right: 10px;
+            spacing: 8px;
 
             // Security glyph
             LucideIcon {
                 visible: root.secure || root.insecure;
                 glyph: "\u{e10b}";  // lock
                 tint: root.secure ? #00ff88 : #ff4444;
-                size: 12px;
-                width: 14px;
+                size: 13px;
+                width: 15px;
             }
 
             // Loading spinner
@@ -170,8 +189,8 @@ export component HudWindow inherits Window {
                 visible: root.loading;
                 glyph: "\u{e109}";  // loader
                 tint: #ffaa00;
-                size: 12px;
-                width: 14px;
+                size: 13px;
+                width: 15px;
                 rot: mod(root.tick / 4ms, 360);
             }
 
@@ -180,15 +199,15 @@ export component HudWindow inherits Window {
                 visible: root.bookmarked;
                 glyph: "\u{e176}";  // star
                 tint: #ffdd00;
-                size: 12px;
-                width: 14px;
+                size: 13px;
+                width: 15px;
             }
 
             Text {
                 text: root.status-text != "" ? root.status-text :
-                      (root.title-text != "" ? root.title-text + " \u{2014} " + root.url-text : root.url-text);
+                      (root.title-text != "" ? root.title-text + "  \u{2014}  " + root.url-text : root.url-text);
                 color: #e0e0e0;
-                font-size: 12px;
+                font-size: 13px;
                 overflow: elide;
                 horizontal-stretch: 1;
                 vertical-alignment: center;
@@ -199,36 +218,45 @@ export component HudWindow inherits Window {
                 visible: abs(root.zoom - 1.0) > 0.001;
                 glyph: "\u{e1b6}";  // zoom-in
                 tint: #b0b0b0;
-                size: 12px;
-                width: 14px;
+                size: 13px;
+                width: 15px;
             }
             Text {
                 visible: abs(root.zoom - 1.0) > 0.001;
                 text: round(root.zoom * 100) + "%";
                 color: #b0b0b0;
-                font-size: 11px;
+                font-size: 12px;
                 vertical-alignment: center;
             }
 
             Text {
                 text: "[" + root.tile-count + "]";
-                color: #808080;
+                color: #808090;
                 font-size: 12px;
                 horizontal-alignment: right;
                 vertical-alignment: center;
             }
 
-            Text {
-                text: root.mode-text;
-                color: root.mode-text == "NORMAL" ? #00ff88 :
-                       root.mode-text == "INSERT" ? #ff8800 :
-                       root.mode-text == "HINT" ? #ff00ff :
-                       root.mode-text == "SEARCH" ? #00aaff : #ffff00;
-                font-size: 12px;
-                font-weight: 700;
-                horizontal-alignment: right;
-                vertical-alignment: center;
-                min-width: 70px;
+            Rectangle {
+                width: 80px;
+                height: parent.height;
+                background: root.mode-text == "NORMAL" ? #00ff8822 :
+                            root.mode-text == "INSERT" ? #ff880022 :
+                            root.mode-text == "HINT" ? #ff00ff22 :
+                            root.mode-text == "SEARCH" ? #00aaff22 : #ffff0022;
+                Text {
+                    text: root.mode-text;
+                    color: root.mode-text == "NORMAL" ? #00ff88 :
+                           root.mode-text == "INSERT" ? #ff8800 :
+                           root.mode-text == "HINT" ? #ff55ff :
+                           root.mode-text == "SEARCH" ? #00aaff : #ffff00;
+                    font-size: 12px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    width: parent.width;
+                    height: parent.height;
+                }
             }
         }
     }
@@ -236,51 +264,98 @@ export component HudWindow inherits Window {
     // Command bar (above status bar, visible only in command mode)
     Rectangle {
         visible: root.command-visible;
-        y: parent.height - 48px;
+        y: parent.height - 26px - 28px;
         width: parent.width;
-        height: 24px;
-        background: #0d0d1aee;
+        height: 28px;
+        background: #0a0a15f0;
 
-        Text {
-            x: 8px;
-            text: ":" + root.command-text;
-            color: white;
-            font-size: 12px;
-            vertical-alignment: center;
+        // Top divider
+        Rectangle {
+            y: 0;
+            width: parent.width;
+            height: 1px;
+            background: #3a3a5e;
+        }
+
+        HorizontalLayout {
+            padding-left: 10px;
+            padding-right: 10px;
+            alignment: start;
+            spacing: 2px;
+            Text {
+                text: ":";
+                color: #ffff00;
+                font-size: 14px;
+                font-weight: 700;
+                vertical-alignment: center;
+                width: 12px;
+            }
+            Text {
+                text: root.command-text;
+                color: white;
+                font-size: 13px;
+                vertical-alignment: center;
+            }
+            // Blinking caret right after the last character.
+            Rectangle {
+                width: 2px;
+                height: 16px;
+                background: white;
+                y: (parent.height - self.height) / 2;
+                opacity: mod(root.tick / 500ms, 2) < 1 ? 1.0 : 0.0;
+            }
         }
     }
 
     // Suggestion list (above command bar)
     Rectangle {
         visible: root.suggestions-visible;
-        y: parent.height - 48px - self.height;
+        y: parent.height - 26px - 28px - self.height;
         width: parent.width;
-        height: min(root.suggestions.length * 24px, 240px);
-        background: #0d0d1aee;
+        height: min(root.suggestions.length * 28px, 280px);
+        background: #0a0a15f0;
+
+        Rectangle {
+            y: parent.height - 1px;
+            width: parent.width;
+            height: 1px;
+            background: #3a3a5e;
+        }
 
         VerticalLayout {
             for item in root.suggestions: Rectangle {
-                height: 24px;
-                background: item.selected ? #333355 : transparent;
+                height: 28px;
+                background: item.selected ? #333366 : transparent;
+
+                // Left accent bar for selected row
+                Rectangle {
+                    visible: item.selected;
+                    x: 0;
+                    width: 3px;
+                    height: parent.height;
+                    background: #00ff88;
+                }
 
                 HorizontalLayout {
-                    padding-left: 8px;
-                    padding-right: 8px;
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 10px;
 
                     Text {
                         text: item.title;
-                        color: item.selected ? white : #c0c0c0;
-                        font-size: 12px;
+                        color: item.selected ? white : #d0d0d0;
+                        font-size: 13px;
+                        font-weight: item.selected ? 600 : 400;
                         overflow: elide;
                         horizontal-stretch: 1;
                         vertical-alignment: center;
                     }
                     Text {
                         text: item.url;
-                        color: #808080;
+                        color: item.selected ? #a0c8ff : #808090;
                         font-size: 11px;
                         overflow: elide;
-                        max-width: 300px;
+                        max-width: 360px;
                         vertical-alignment: center;
                     }
                 }
@@ -291,26 +366,40 @@ export component HudWindow inherits Window {
     // Search bar
     Rectangle {
         visible: root.search-visible;
-        y: parent.height - 48px;
+        y: parent.height - 26px - 28px;
         width: parent.width;
-        height: 24px;
-        background: #0d0d1aee;
+        height: 28px;
+        background: #0a0a15f0;
+
+        Rectangle {
+            y: 0;
+            width: parent.width;
+            height: 1px;
+            background: #3a3a5e;
+        }
 
         HorizontalLayout {
-            padding-left: 8px;
-            padding-right: 8px;
+            padding-left: 10px;
+            padding-right: 10px;
+            spacing: 6px;
 
+            LucideIcon {
+                glyph: "\u{e151}";
+                tint: #ffaa00;
+                size: 14px;
+                width: 16px;
+            }
             Text {
-                text: "/" + root.search-text;
+                text: root.search-text;
                 color: white;
-                font-size: 12px;
+                font-size: 13px;
                 vertical-alignment: center;
                 horizontal-stretch: 1;
             }
             Text {
                 text: root.search-info;
-                color: #808080;
-                font-size: 11px;
+                color: #a0a0b0;
+                font-size: 12px;
                 vertical-alignment: center;
             }
         }
