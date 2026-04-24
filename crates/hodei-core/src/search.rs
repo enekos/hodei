@@ -97,7 +97,7 @@ pub const SEARCH_CLEAR_SCRIPT: &str = r#"(function() {
     return JSON.stringify({ cleared: true });
 })"#;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct SearchResult {
     pub index: usize,
     pub count: usize,
@@ -111,7 +111,12 @@ impl SearchResult {
             format!("{}/{}", self.index, self.count)
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
+    }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -127,5 +132,46 @@ mod tests {
     fn info_string_with_matches() {
         let r = SearchResult { index: 3, count: 17 };
         assert_eq!(r.info_string(), "3/17");
+    }
+
+    #[test]
+    fn info_string_ignores_nonzero_index_when_count_is_zero() {
+        // Can happen during a race: the JS search counted zero matches after
+        // we'd already set an index from a previous query. The display should
+        // still read "0/0" not "3/0".
+        let r = SearchResult { index: 3, count: 0 };
+        assert_eq!(r.info_string(), "0/0");
+    }
+
+    #[test]
+    fn is_empty_tracks_count() {
+        assert!(SearchResult::default().is_empty());
+        assert!(SearchResult { index: 0, count: 0 }.is_empty());
+        assert!(!SearchResult { index: 1, count: 5 }.is_empty());
+    }
+
+    #[test]
+    fn equality_requires_both_fields() {
+        let a = SearchResult { index: 1, count: 2 };
+        let b = SearchResult { index: 1, count: 2 };
+        let c = SearchResult { index: 2, count: 2 };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn scripts_are_non_empty_bare_js_functions() {
+        // All three constants are bare function expressions; the app-side
+        // injector appends `(...)` / `()` at call time. Guard against anyone
+        // helpfully self-invoking them here (which would double-call).
+        for (name, s) in [
+            ("init", SEARCH_INIT_SCRIPT),
+            ("navigate", SEARCH_NAVIGATE_SCRIPT),
+            ("clear", SEARCH_CLEAR_SCRIPT),
+        ] {
+            assert!(s.starts_with("(function()"), "{name}: should open with (function()");
+            assert!(s.ends_with("})"), "{name}: should end with }}) — got tail {:?}", &s[s.len().saturating_sub(4)..]);
+            assert!(s.len() > 50, "{name}: script unexpectedly short");
+        }
     }
 }

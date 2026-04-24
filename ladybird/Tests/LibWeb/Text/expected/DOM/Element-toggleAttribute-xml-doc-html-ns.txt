@@ -1,3 +1,0 @@
-<element xmlns="http://www.w3.org/1999/xhtml" Attribute="Value">Text</element>
-<element xmlns="http://www.w3.org/1999/xhtml">Text</element>
-<element xmlns="http://www.w3.org/1999/xhtml" Attribute="">Text</element>

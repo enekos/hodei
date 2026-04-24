@@ -1,2 +1,0 @@
-PASS text/html
-PASS application/xhtml+xml

@@ -1,7 +1,0 @@
-Harness status: OK
-
-Found 2 tests
-
-2 Pass
-Pass	CSSStyleDeclaration.removeProperty("all")
-Pass	CSSStyleDeclaration.removeProperty("all") 1

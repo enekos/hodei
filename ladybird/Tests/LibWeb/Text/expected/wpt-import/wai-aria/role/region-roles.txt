@@ -1,7 +1,0 @@
-Harness status: OK
-
-Found 2 tests
-
-2 Pass
-Pass	region without label
-Pass	region with label

@@ -1,2 +1,0 @@
-formData.get('field1') === 'value1': true
-formData.get('field2') === 'value2': true

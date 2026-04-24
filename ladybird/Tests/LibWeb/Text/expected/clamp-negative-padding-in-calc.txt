@@ -1,3 +1,0 @@
-PASS  Negative padding on element #one is clamped to zero.
-PASS  Negative padding on element #two is clamped to zero.
-PASS  Negative padding on element #three is clamped to zero.

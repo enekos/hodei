@@ -1,7 +1,0 @@
-{
-    "value": "value",
-    "array": [1, 2, 3],
-    "map": {
-        "innerValue": "innerValue"
-    }
-}

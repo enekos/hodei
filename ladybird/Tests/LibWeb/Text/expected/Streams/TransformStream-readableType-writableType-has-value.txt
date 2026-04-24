@@ -1,2 +1,0 @@
-'readableType' => Exception raised of RangeError
-'writableType' => Exception raised of RangeError

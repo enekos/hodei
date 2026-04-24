@@ -1,2 +1,0 @@
-RangeError: 0 is an invalid value for sw
-Bitmap is correctly loaded

@@ -116,4 +116,62 @@ mod tests {
         let ranked = rank_suggestions(suggestions, 5);
         assert_eq!(ranked.len(), 5);
     }
+
+    #[test]
+    fn rank_empty_returns_empty() {
+        let ranked = rank_suggestions(vec![], 10);
+        assert!(ranked.is_empty());
+    }
+
+    #[test]
+    fn rank_limit_zero_returns_empty() {
+        let s = vec![Suggestion {
+            url: "a".into(), title: "A".into(),
+            source: SuggestionSource::History, score: 100,
+        }];
+        assert!(rank_suggestions(s, 0).is_empty());
+    }
+
+    #[test]
+    fn rank_limit_larger_than_len_returns_all() {
+        let s = vec![
+            Suggestion { url: "a".into(), title: "A".into(), source: SuggestionSource::History, score: 1 },
+            Suggestion { url: "b".into(), title: "B".into(), source: SuggestionSource::History, score: 2 },
+        ];
+        assert_eq!(rank_suggestions(s, 50).len(), 2);
+    }
+
+    #[test]
+    fn rank_bookmark_bonus_can_overtake_higher_history() {
+        // History at 40 vs bookmark at 25+20=45 → bookmark wins.
+        let s = vec![
+            Suggestion { url: "h".into(), title: "H".into(), source: SuggestionSource::History, score: 40 },
+            Suggestion { url: "b".into(), title: "B".into(), source: SuggestionSource::Bookmark, score: 25 },
+        ];
+        let ranked = rank_suggestions(s, 10);
+        assert_eq!(ranked[0].source, SuggestionSource::Bookmark);
+    }
+
+    #[test]
+    fn rank_saturates_at_u32_max_for_bookmark_bonus() {
+        // The saturating_add guard means we don't overflow even at the cap.
+        let s = vec![Suggestion {
+            url: "b".into(), title: "B".into(),
+            source: SuggestionSource::Bookmark,
+            score: u32::MAX,
+        }];
+        let ranked = rank_suggestions(s, 10);
+        assert_eq!(ranked[0].score, u32::MAX);
+    }
+
+    #[test]
+    fn score_prefix_longer_than_text_is_no_match() {
+        assert_eq!(score("rustlang-forever", "rust"), 0);
+    }
+
+    #[test]
+    fn score_unicode_substring() {
+        // Lowercasing non-ASCII should still match.
+        assert!(score("café", "Café Luna") > 0);
+    }
 }

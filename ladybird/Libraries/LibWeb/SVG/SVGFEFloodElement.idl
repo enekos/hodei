@@ -1,8 +1,0 @@
-#import <SVG/SVGFilterPrimitiveStandardAttributes.idl>
-
-// https://drafts.csswg.org/filter-effects-1/#InterfaceSVGFEFloodElement
-[Exposed=Window]
-interface SVGFEFloodElement : SVGElement {
-};
-
-SVGFEFloodElement includes SVGFilterPrimitiveStandardAttributes;

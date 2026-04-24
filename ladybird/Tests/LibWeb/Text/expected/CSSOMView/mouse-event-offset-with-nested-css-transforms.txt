@@ -1,2 +1,0 @@
-offsetX: 5
-offsetY: 5

@@ -1,3 +1,0 @@
-dialog.open state before close(): true
-dialog.open state after close(): false
-dialog.returnValue state after close(): after-close

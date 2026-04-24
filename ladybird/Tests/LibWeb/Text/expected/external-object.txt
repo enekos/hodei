@@ -1,2 +1,0 @@
-external.AddSearchProvider() returns undefined: true
-external.IsSearchProviderInstalled() returns undefined: true

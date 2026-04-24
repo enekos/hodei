@@ -1,7 +1,0 @@
-Harness status: OK
-
-Found 2 tests
-
-2 Pass
-Pass	relatedTarget should not leak at capturing phase, at window object.
-Pass	relatedTarget should not leak at target.

@@ -1,7 +1,0 @@
-Harness status: OK
-
-Found 2 tests
-
-2 Pass
-Pass	window.clientInformation exists and equals window.navigator
-Pass	window.clientInformation is Replaceable

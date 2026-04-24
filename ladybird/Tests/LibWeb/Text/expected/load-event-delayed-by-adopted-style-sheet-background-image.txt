@@ -1,3 +1,0 @@
-Load event delayed by at least 400ms: true
-Image resource entry exists: true
-Image loaded before load event: true

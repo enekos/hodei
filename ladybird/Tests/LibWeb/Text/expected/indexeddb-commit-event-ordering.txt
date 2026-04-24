@@ -1,7 +1,0 @@
-setup.upgradeneeded
-setup.success
-tx.commit() called
-putA.success
-putB.success
-tx.complete
-DONE

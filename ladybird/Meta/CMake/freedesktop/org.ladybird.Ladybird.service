@@ -1,3 +1,0 @@
-[D-BUS Service]
-Name=org.ladybird.Ladybird
-Exec=Ladybird --force-new-process

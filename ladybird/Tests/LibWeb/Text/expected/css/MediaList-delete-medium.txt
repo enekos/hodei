@@ -1,7 +1,0 @@
-Initial: screen, print
-Length: 2
-After removing print: screen
-Length: 1
-Remove nonexistent throws: NotFoundError
-Unchanged: screen
-Remove unknown throws: NotFoundError

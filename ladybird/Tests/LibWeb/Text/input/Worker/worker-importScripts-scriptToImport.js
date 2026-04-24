@@ -1,3 +1,0 @@
-function importedFunction() {
-    return "YES";
-}

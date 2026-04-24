@@ -1,3 +1,0 @@
-Inside circle: PASS
-Outside circle (in bbox): PASS
-Inside circle edge: PASS

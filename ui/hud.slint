@@ -39,11 +39,16 @@ component IconTile inherits Rectangle {
     in property <color> tint: #b0b0b0;
     in property <bool> dim: false;
     in property <bool> highlight: false;
+    callback clicked();
 
     width: 52px;
     height: 30px;
-    background: root.highlight ? #2a2a4e : transparent;
+    background: root.highlight ? #2a2a4e
+              : touch.pressed ? #3a3a5e
+              : touch.has-hover ? #22223a
+              : transparent;
     border-radius: 4px;
+    animate background { duration: 90ms; easing: ease-out; }
 
     HorizontalLayout {
         padding-left: 6px;
@@ -53,17 +58,26 @@ component IconTile inherits Rectangle {
 
         LucideIcon {
             glyph: root.glyph;
-            tint: root.dim ? #505060 : root.tint;
+            tint: root.dim ? #505060
+                : touch.has-hover ? white
+                : root.tint;
             size: 16px;
             width: 18px;
         }
         Text {
             text: root.key;
-            color: root.dim ? #505060 : #9090a0;
+            color: root.dim ? #505060
+                 : touch.has-hover ? #d0d0e0
+                 : #9090a0;
             font-size: 11px;
             font-weight: 600;
             vertical-alignment: center;
         }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: root.dim ? default : pointer;
+        clicked => { root.clicked(); }
     }
 }
 
@@ -98,6 +112,21 @@ export component HudWindow inherits Window {
     // Drives the loader spinner rotation (Slint updates this automatically).
     property <duration> tick: animation-tick();
 
+    // Click callbacks from the top icon bar.
+    callback clicked-back();
+    callback clicked-forward();
+    callback clicked-reload();
+    callback clicked-home();
+    callback clicked-split-v();
+    callback clicked-split-h();
+    callback clicked-close();
+    callback clicked-swap();
+    callback clicked-hint();
+    callback clicked-search();
+    callback clicked-command();
+    callback clicked-bookmark();
+    callback clicked-shortcuts-dismiss();
+
     // === Top icon bar — visible only in NORMAL mode ===
     Rectangle {
         visible: root.mode-text == "NORMAL";
@@ -125,10 +154,14 @@ export component HudWindow inherits Window {
             // Navigation group
             HorizontalLayout {
                 spacing: 2px;
-                IconTile { glyph: "\u{e048}"; key: "⌃b"; tint: #7fd4ff; dim: !root.can-back; }
-                IconTile { glyph: "\u{e049}"; key: "⌃f"; tint: #7fd4ff; dim: !root.can-forward; }
-                IconTile { glyph: "\u{e149}"; key: "r"; tint: #7fd4ff; }
-                IconTile { glyph: "\u{e0f5}"; key: "G"; tint: #7fd4ff; }
+                IconTile { glyph: "\u{e048}"; key: "⌃b"; tint: #7fd4ff; dim: !root.can-back;
+                           clicked => { root.clicked-back(); } }
+                IconTile { glyph: "\u{e049}"; key: "⌃f"; tint: #7fd4ff; dim: !root.can-forward;
+                           clicked => { root.clicked-forward(); } }
+                IconTile { glyph: "\u{e149}"; key: "r"; tint: #7fd4ff;
+                           clicked => { root.clicked-reload(); } }
+                IconTile { glyph: "\u{e0f5}"; key: "G"; tint: #7fd4ff;
+                           clicked => { root.clicked-home(); } }
             }
 
             Rectangle { width: 1px; background: #2a2a3e; }
@@ -136,10 +169,14 @@ export component HudWindow inherits Window {
             // Tiles group
             HorizontalLayout {
                 spacing: 2px;
-                IconTile { glyph: "\u{e098}"; key: "⌃v"; tint: #00ff88; }
-                IconTile { glyph: "\u{e439}"; key: "⌃s"; tint: #00ff88; }
-                IconTile { glyph: "\u{e1b2}"; key: "q"; tint: #ff6677; }
-                IconTile { glyph: "\u{e24a}"; key: "z"; tint: #00ff88; }
+                IconTile { glyph: "\u{e098}"; key: "⌃v"; tint: #00ff88;
+                           clicked => { root.clicked-split-v(); } }
+                IconTile { glyph: "\u{e439}"; key: "⌃s"; tint: #00ff88;
+                           clicked => { root.clicked-split-h(); } }
+                IconTile { glyph: "\u{e1b2}"; key: "q"; tint: #ff6677;
+                           clicked => { root.clicked-close(); } }
+                IconTile { glyph: "\u{e24a}"; key: "z"; tint: #00ff88;
+                           clicked => { root.clicked-swap(); } }
             }
 
             Rectangle { width: 1px; background: #2a2a3e; }
@@ -147,10 +184,14 @@ export component HudWindow inherits Window {
             // Tools group
             HorizontalLayout {
                 spacing: 2px;
-                IconTile { glyph: "\u{e180}"; key: "f"; tint: #ff55ff; }
-                IconTile { glyph: "\u{e151}"; key: "/"; tint: #ffaa00; }
-                IconTile { glyph: "\u{e181}"; key: ":"; tint: #ffff00; }
-                IconTile { glyph: "\u{e060}"; key: "B"; tint: #ffdd00; highlight: root.bookmarked; }
+                IconTile { glyph: "\u{e180}"; key: "f"; tint: #ff55ff;
+                           clicked => { root.clicked-hint(); } }
+                IconTile { glyph: "\u{e151}"; key: "/"; tint: #ffaa00;
+                           clicked => { root.clicked-search(); } }
+                IconTile { glyph: "\u{e181}"; key: ":"; tint: #ffff00;
+                           clicked => { root.clicked-command(); } }
+                IconTile { glyph: "\u{e060}"; key: "B"; tint: #ffdd00; highlight: root.bookmarked;
+                           clicked => { root.clicked-bookmark(); } }
             }
         }
     }
@@ -433,6 +474,10 @@ export component HudWindow inherits Window {
         height: parent.height;
         background: #000000aa;
 
+        TouchArea {
+            clicked => { root.clicked-shortcuts-dismiss(); }
+        }
+
         Rectangle {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
@@ -440,6 +485,8 @@ export component HudWindow inherits Window {
             height: min(420px, parent.height - 48px);
             background: #1a1a2eee;
             border-radius: 6px;
+            // Swallow clicks on the card so they don't dismiss.
+            TouchArea { }
 
             VerticalLayout {
                 padding: 16px;

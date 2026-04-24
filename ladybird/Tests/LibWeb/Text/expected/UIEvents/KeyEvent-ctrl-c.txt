@@ -1,2 +1,0 @@
-key="c" code=KeyC ctrlKey=true
-key="C" code=KeyC ctrlKey=true

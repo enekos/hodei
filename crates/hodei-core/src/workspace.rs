@@ -190,4 +190,74 @@ mod tests {
         let result = wm.switch_to("cached", &[], &[], None).unwrap();
         assert!(result.is_some());
     }
+
+    #[test]
+    fn save_active_noops_when_no_active_workspace() {
+        // active_name() is "" by default — saving should be an explicit no-op
+        // rather than writing a session with an empty name to the DB.
+        let mut wm = make_workspace_manager();
+        let (nodes, tiles, focused) = sample_state();
+        assert_eq!(wm.active_name(), "");
+        wm.save_active(&nodes, &tiles, focused).unwrap();
+        assert!(wm.list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn switch_to_self_reloads_cache_and_keeps_active() {
+        let mut wm = make_workspace_manager();
+        let (nodes, tiles, focused) = sample_state();
+        wm.set_active("work");
+        wm.save_active(&nodes, &tiles, focused).unwrap();
+        let res = wm.switch_to("work", &[], &[], None).unwrap();
+        assert!(res.is_some());
+        assert_eq!(wm.active_name(), "work");
+    }
+
+    #[test]
+    fn switch_to_unknown_returns_none_and_stays_set() {
+        let mut wm = make_workspace_manager();
+        let res = wm.switch_to("never-saved", &[], &[], None).unwrap();
+        assert!(res.is_none());
+        // But active is now "never-saved" — follows the "switch regardless"
+        // contract so a brand new workspace can be created and saved into.
+        assert_eq!(wm.active_name(), "never-saved");
+    }
+
+    #[test]
+    fn create_new_sets_active_and_seeds_cache() {
+        let mut wm = make_workspace_manager();
+        wm.create_new("scratch");
+        assert_eq!(wm.active_name(), "scratch");
+        // A subsequent switch to scratch should hit the in-memory cache
+        // (the DB has no row yet).
+        let res = wm.switch_to("scratch", &[], &[], None).unwrap();
+        assert!(res.is_some());
+        assert!(res.unwrap().tiles.is_empty());
+    }
+
+    #[test]
+    fn delete_removes_from_db_and_cache() {
+        let mut wm = make_workspace_manager();
+        let (nodes, tiles, focused) = sample_state();
+        wm.set_active("scratch");
+        wm.save_active(&nodes, &tiles, focused).unwrap();
+        wm.set_active("other");
+        assert!(wm.delete("scratch").unwrap());
+        // After deletion a switch must not surface stale data.
+        let res = wm.switch_to("scratch", &[], &[], None).unwrap();
+        assert!(res.is_none());
+    }
+
+    #[test]
+    fn list_reflects_saved_workspaces_only() {
+        let mut wm = make_workspace_manager();
+        let (nodes, tiles, focused) = sample_state();
+        wm.set_active("a");
+        wm.save_active(&nodes, &tiles, focused).unwrap();
+        wm.set_active("b");
+        wm.save_active(&nodes, &tiles, focused).unwrap();
+        let names: Vec<String> = wm.list().unwrap().into_iter().map(|s| s.name).collect();
+        assert!(names.contains(&"a".to_string()));
+        assert!(names.contains(&"b".to_string()));
+    }
 }

@@ -1,3 +1,0 @@
-blur(5px)
-sepia(0.5)
-none

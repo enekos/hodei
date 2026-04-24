@@ -1,7 +1,0 @@
-Harness status: OK
-
-Found 2 tests
-
-2 Pass
-Pass	src="about:blank" does not crash.
-Pass	src="" does not crash.

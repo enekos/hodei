@@ -2,6 +2,11 @@ use std::rc::Rc;
 use rusqlite::{params, Connection};
 use crate::types::*;
 
+/// Everything needed to reconstitute a workspace: the BSP tree in BFS order,
+/// the tile metadata for each leaf, and which tile was focused. Returned by
+/// `SessionManager::restore`.
+pub type RestoredSession = (Vec<LayoutNodeRow>, Vec<TileRow>, Option<ViewId>);
+
 pub struct SessionManager {
     conn: Rc<Connection>,
 }
@@ -61,7 +66,7 @@ impl SessionManager {
         tx.commit()
     }
 
-    pub fn restore(&self, name: &str) -> Result<Option<(Vec<LayoutNodeRow>, Vec<TileRow>, Option<ViewId>)>, rusqlite::Error> {
+    pub fn restore(&self, name: &str) -> Result<Option<RestoredSession>, rusqlite::Error> {
         let session_id: Option<i64> = self.conn
             .query_row(
                 "SELECT id FROM sessions WHERE name = ?1",
@@ -285,5 +290,102 @@ mod tests {
         sm.save("doomed", &sample_nodes(), &sample_tiles(), None).unwrap();
         sm.delete("doomed").unwrap();
         assert!(sm.restore("doomed").unwrap().is_none());
+    }
+
+    #[test]
+    fn save_overwrites_existing_session_with_same_name() {
+        let sm = make_session_manager();
+        let tiles_v1 = sample_tiles();
+        sm.save("same", &sample_nodes(), &tiles_v1, Some(ViewId(1))).unwrap();
+
+        let tiles_v2 = vec![TileRow {
+            view_id: ViewId(99),
+            url: "https://replaced.test".into(),
+            title: "Replaced".into(),
+            scroll_x: 0.0,
+            scroll_y: 0.0,
+        }];
+        sm.save("same", &sample_nodes(), &tiles_v2, Some(ViewId(99))).unwrap();
+
+        let (_, restored, focused) = sm.restore("same").unwrap().unwrap();
+        assert_eq!(restored.len(), 1);
+        assert_eq!(restored[0].url, "https://replaced.test");
+        assert_eq!(focused, Some(ViewId(99)));
+    }
+
+    #[test]
+    fn save_empty_session_restores_as_empty() {
+        let sm = make_session_manager();
+        sm.save("empty", &[], &[], None).unwrap();
+        let (nodes, tiles, focused) = sm.restore("empty").unwrap().unwrap();
+        assert!(nodes.is_empty());
+        assert!(tiles.is_empty());
+        assert!(focused.is_none());
+    }
+
+    #[test]
+    fn layout_node_direction_roundtrips() {
+        let sm = make_session_manager();
+        let nodes = vec![
+            LayoutNodeRow {
+                node_index: 0, is_leaf: false,
+                direction: Some(SplitDirection::Horizontal),
+                ratio: Some(0.3), view_id: None,
+            },
+            LayoutNodeRow {
+                node_index: 1, is_leaf: false,
+                direction: Some(SplitDirection::Vertical),
+                ratio: Some(0.7), view_id: None,
+            },
+        ];
+        sm.save("dirs", &nodes, &[], None).unwrap();
+        let (restored, _, _) = sm.restore("dirs").unwrap().unwrap();
+        assert_eq!(restored[0].direction, Some(SplitDirection::Horizontal));
+        assert_eq!(restored[1].direction, Some(SplitDirection::Vertical));
+        assert!((restored[0].ratio.unwrap() - 0.3).abs() < 1e-6);
+    }
+
+    #[test]
+    fn large_view_ids_survive_i64_cast() {
+        // ViewId is u64; we cast to i64 for SQLite. Anything up to i64::MAX
+        // must round-trip exactly.
+        let sm = make_session_manager();
+        let big = ViewId(i64::MAX as u64);
+        let tiles = vec![TileRow {
+            view_id: big,
+            url: "https://x".into(),
+            title: "x".into(),
+            scroll_x: 0.0,
+            scroll_y: 0.0,
+        }];
+        let nodes = vec![LayoutNodeRow {
+            node_index: 0, is_leaf: true,
+            direction: None, ratio: None,
+            view_id: Some(big),
+        }];
+        sm.save("big", &nodes, &tiles, Some(big)).unwrap();
+        let (_, restored, focused) = sm.restore("big").unwrap().unwrap();
+        assert_eq!(restored[0].view_id, big);
+        assert_eq!(focused, Some(big));
+    }
+
+    #[test]
+    fn list_contains_every_saved_session() {
+        // We can't assert strict ordering because SQLite's CURRENT_TIMESTAMP
+        // has 1-second granularity and rapid saves tie. Assert set
+        // membership instead — the ORDER BY is a best-effort hint.
+        let sm = make_session_manager();
+        sm.save("alpha", &[], &[], None).unwrap();
+        sm.save("beta", &[], &[], None).unwrap();
+        let names: Vec<String> = sm.list().unwrap().into_iter().map(|s| s.name).collect();
+        assert!(names.contains(&"alpha".to_string()));
+        assert!(names.contains(&"beta".to_string()));
+        assert_eq!(names.len(), 2);
+    }
+
+    #[test]
+    fn delete_missing_does_not_error() {
+        let sm = make_session_manager();
+        sm.delete("does-not-exist").unwrap();
     }
 }

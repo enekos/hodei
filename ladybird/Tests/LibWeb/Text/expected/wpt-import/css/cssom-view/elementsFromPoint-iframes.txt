@@ -1,7 +1,0 @@
-Harness status: OK
-
-Found 2 tests
-
-2 Pass
-Pass	elementsFromPoint on the root document for points in iframe elements
-Pass	elementsFromPoint on inner documents

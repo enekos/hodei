@@ -1,2 +1,0 @@
-<DIV id="div1">
-<DIV id="div2">

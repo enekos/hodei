@@ -1,3 +1,0 @@
-exported 128 bit key length: 16
-exported 192 bit key length: 24
-exported 256 bit key length: 32

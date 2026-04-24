@@ -144,4 +144,74 @@ mod tests {
         let results = hm.search("", 10).unwrap();
         assert_eq!(results.len(), 2);
     }
+
+    #[test]
+    fn prune_keeps_newest_entries() {
+        // Insert N+2 entries on a manager capped at N; the two oldest should
+        // be gone and the newest must survive.
+        let conn = db::open_database_in_memory().unwrap();
+        let hm = HistoryManager::new(conn, 3);
+        for i in 0..5 {
+            hm.record_visit(&format!("https://{}.test", i), &format!("Site {}", i))
+                .unwrap();
+        }
+        let all = hm.recent(100).unwrap();
+        assert!(all.len() <= 3);
+        let urls: Vec<&str> = all.iter().map(|e| e.url.as_str()).collect();
+        // Site 4 is the newest — must still be present.
+        assert!(urls.iter().any(|u| u.ends_with("/4.test")));
+        // Site 0 is oldest — must have been pruned.
+        assert!(!urls.iter().any(|u| u.ends_with("/0.test")));
+    }
+
+    #[test]
+    fn search_orders_by_visit_count_then_recency() {
+        let hm = make_history();
+        hm.record_visit("https://rare.test", "Rare rust").unwrap();
+        hm.record_visit("https://popular.test", "Popular rust").unwrap();
+        hm.record_visit("https://popular.test", "Popular rust").unwrap();
+        hm.record_visit("https://popular.test", "Popular rust").unwrap();
+        let results = hm.search("rust", 10).unwrap();
+        assert_eq!(results[0].url, "https://popular.test");
+        assert_eq!(results[0].visit_count, 3);
+    }
+
+    #[test]
+    fn record_preserves_title_updates() {
+        let hm = make_history();
+        hm.record_visit("https://t.test", "Before").unwrap();
+        hm.record_visit("https://t.test", "After").unwrap();
+        let r = hm.search("t.test", 1).unwrap();
+        assert_eq!(r[0].title, "After");
+    }
+
+    #[test]
+    fn search_handles_sql_wildcard_chars_in_query() {
+        // The `%` and `_` SQLite wildcards should be treated literally — a
+        // user searching for "50%" should not match all URLs.
+        let hm = make_history();
+        hm.record_visit("https://example.test/a", "A").unwrap();
+        hm.record_visit("https://example.test/b", "B").unwrap();
+        // The current LIKE-based search is NOT escape-safe; this test
+        // documents the actual (over-broad) behaviour so a future fix is
+        // tested-against rather than surprising.
+        let results = hm.search("%", 10).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn recent_on_empty_db_is_empty() {
+        let hm = make_history();
+        assert!(hm.recent(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn respects_limit() {
+        let hm = make_history();
+        for i in 0..10 {
+            hm.record_visit(&format!("https://{}.test", i), "t").unwrap();
+        }
+        assert_eq!(hm.recent(3).unwrap().len(), 3);
+        assert_eq!(hm.search("", 5).unwrap().len(), 5);
+    }
 }

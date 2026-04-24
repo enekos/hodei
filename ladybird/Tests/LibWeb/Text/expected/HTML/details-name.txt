@@ -1,7 +1,0 @@
-details0=✗ details1=✗ details2=✗ details3=✗ details4=✗
-details0=✓ details1=✗ details2=✗ details3=✗ details4=✗
-details0=✗ details1=✓ details2=✗ details3=✗ details4=✗
-details0=✗ details1=✗ details2=✓ details3=✗ details4=✗
-details0=✗ details1=✗ details2=✓ details3=✓ details4=✗
-details0=✗ details1=✗ details2=✓ details3=✓ details4=✓
-details0=✓ details1=✗ details2=✗ details3=✓ details4=✓

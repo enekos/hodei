@@ -1,4 +1,0 @@
-mouseup event on box
-click event on box
-click event on input#radio1
-click event on input#radio2

@@ -1,4 +1,0 @@
-paused
-running
-running
-paused

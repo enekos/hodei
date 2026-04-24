@@ -1,1 +1,0 @@
-animation count: 1

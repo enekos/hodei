@@ -1,6 +1,0 @@
-#import <RequestIdleCallback/IdleDeadline.idl>
-
-dictionary IdleRequestOptions {
-    unsigned long timeout;
-};
-callback IdleRequestCallback = undefined (IdleDeadline deadline);

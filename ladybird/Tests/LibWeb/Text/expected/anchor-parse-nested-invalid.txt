@@ -1,3 +1,0 @@
-no space before garbage: 
-valid nested: anchor(--foo top, anchor(--bar bottom))
-trailing whitespace: anchor(--foo top, anchor(--bar bottom))

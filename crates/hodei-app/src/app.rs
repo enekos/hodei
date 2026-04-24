@@ -230,6 +230,13 @@ impl App {
                             engine.create_tile(new_id, "about:blank", w, h);
                         }
                         self.resize_all_tiles();
+                        // Let Servo finish laying out both the new and the
+                        // re-sized existing tile before the first blit so we
+                        // don't flash a stale framebuffer into the new region.
+                        if let Some(engine) = &mut self.engine {
+                            engine.spin();
+                        }
+                        self.pending_paint = true;
                         self.update_hud();
                         self.request_redraw();
                     }
@@ -249,6 +256,9 @@ impl App {
                         if let Some(engine) = &mut self.engine {
                             engine.destroy_tile(focused);
                         }
+                        self.resize_all_tiles();
+                        if let Some(engine) = &mut self.engine { engine.spin(); }
+                        self.pending_paint = true;
                         self.update_hud();
                         self.request_redraw();
                     }
@@ -262,6 +272,8 @@ impl App {
                         log::debug!("ResizeSplit: focused={:?} dir={:?} delta={}", focused, dir, signed_delta);
                         self.layout.resize_split(focused, signed_delta);
                         self.resize_all_tiles();
+                        if let Some(engine) = &mut self.engine { engine.spin(); }
+                        self.pending_paint = true;
                         self.request_redraw();
                     }
                 }
@@ -1251,6 +1263,32 @@ impl App {
         result
     }
 
+    /// Is the given window-local physical-pixel point inside a HUD region
+    /// that should consume the pointer event (top icon bar, bottom status bar,
+    /// command/search overlay, or the shortcuts modal)?
+    fn is_hud_point(&self, _x: f32, y: f32) -> bool {
+        let Some(hud) = &self.hud else { return false };
+        let sf = hud.scale_factor();
+        let h = hud.height() as f32;
+        // Shortcuts modal is full-screen when visible.
+        if self.show_shortcuts {
+            return true;
+        }
+        // Top icon bar (NORMAL mode only) — 34 logical px tall.
+        let in_normal = matches!(self.input.mode(), Mode::Normal);
+        if in_normal && y < 34.0 * sf {
+            return true;
+        }
+        // Bottom status bar — 26 logical px tall.
+        if y > h - 26.0 * sf {
+            return true;
+        }
+        // Command / search bar sits just above the status bar (28 logical px).
+        // We only swallow clicks there if it's visible; otherwise the bar is
+        // invisible and the click should fall through to Servo.
+        false
+    }
+
     fn click_to_focus(&mut self, x: f32, y: f32) {
         let resolved = self.layout.resolve();
         for (view_id, rect) in resolved {
@@ -1438,6 +1476,32 @@ impl ApplicationHandler<UserEvent> for App {
         // Initialize HUD
         let hud = Hud::new(size.width, size.height, scale_factor);
 
+        // Wire HUD click callbacks to dispatch Actions back to the main loop.
+        // Each callback fires on the main thread (Slint is single-threaded via
+        // our custom Platform), but we can't borrow `self` inside an `Fn`, so
+        // we hop through the winit EventLoopProxy.
+        {
+            use hodei_core::input::Action;
+            use hodei_core::types::SplitDirection;
+            let px = |a: Action| {
+                let proxy = self.proxy.clone();
+                move || { let _ = proxy.send_event(UserEvent::HudAction(a.clone())); }
+            };
+            hud.on_clicked_back(px(Action::Back));
+            hud.on_clicked_forward(px(Action::Forward));
+            hud.on_clicked_reload(px(Action::Reload));
+            hud.on_clicked_home(px(Action::GoHome));
+            hud.on_clicked_split_v(px(Action::SplitView(SplitDirection::Vertical)));
+            hud.on_clicked_split_h(px(Action::SplitView(SplitDirection::Horizontal)));
+            hud.on_clicked_close(px(Action::CloseView));
+            hud.on_clicked_swap(px(Action::SwapTiles));
+            hud.on_clicked_hint(px(Action::EnterHintMode));
+            hud.on_clicked_search(px(Action::EnterSearch));
+            hud.on_clicked_command(px(Action::EnterCommand));
+            hud.on_clicked_bookmark(px(Action::Bookmark(None)));
+            hud.on_clicked_shortcuts_dismiss(px(Action::ShowShortcuts));
+        }
+
         // Initialize layout
         self.layout = BspLayout::new(Rect::new(0.0, 0.0, size.width as f32, size.height as f32));
 
@@ -1569,10 +1633,26 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::CursorMoved { position, .. } => {
                 log::trace!("CursorMoved: ({}, {})", position.x, position.y);
                 self.mouse_position = (position.x, position.y);
+                // Always let the HUD track pointer moves so hover states work.
+                if let Some(hud) = &self.hud {
+                    hud.dispatch_pointer_moved(position.x as f32, position.y as f32);
+                }
+                if self.is_hud_point(position.x as f32, position.y as f32) {
+                    // Hover in the HUD bar — don't also scroll/drag the page.
+                    self.request_redraw();
+                    return;
+                }
                 self.dispatch_mouse_event(CoreMouseEvent::Move {
                     x: position.x as f32,
                     y: position.y as f32,
                 });
+            }
+
+            WindowEvent::CursorLeft { .. } => {
+                if let Some(hud) = &self.hud {
+                    hud.dispatch_pointer_exited();
+                }
+                self.request_redraw();
             }
 
             WindowEvent::MouseInput { state: button_state, button, .. } => {
@@ -1613,6 +1693,26 @@ impl ApplicationHandler<UserEvent> for App {
                         button: core_button,
                     },
                 };
+                // Route left-button clicks to the HUD first if they land in a
+                // HUD region. Slint's TouchAreas fire their callbacks via the
+                // EventLoopProxy, and we swallow the event so it doesn't
+                // propagate into the webview underneath.
+                if matches!(button, winit::event::MouseButton::Left)
+                    && self.is_hud_point(mx as f32, my as f32)
+                {
+                    if let Some(hud) = &self.hud {
+                        match button_state {
+                            winit::event::ElementState::Pressed => {
+                                hud.dispatch_pointer_pressed(mx as f32, my as f32);
+                            }
+                            winit::event::ElementState::Released => {
+                                hud.dispatch_pointer_released(mx as f32, my as f32);
+                            }
+                        }
+                    }
+                    self.request_redraw();
+                    return;
+                }
                 // Click-to-focus: if clicking inside a non-focused tile, focus it
                 if let CoreMouseEvent::Down { x, y, .. } = event {
                     self.click_to_focus(x, y);
@@ -1654,7 +1754,7 @@ impl ApplicationHandler<UserEvent> for App {
                     0.0, 0.0,
                     size.width as f32, size.height as f32,
                 ));
-                // Resize the window rendering context and all tiles
+                // Resize the window rendering context and all tiles.
                 if let Some(engine) = &mut self.engine {
                     engine.resize_window(size.width, size.height);
                 }
@@ -1666,6 +1766,15 @@ impl ApplicationHandler<UserEvent> for App {
                     let gl = engine.gl_context();
                     unsafe { compositor.resize(&gl, size.width, size.height); }
                 }
+                // Nudge Servo so it can lay out the new viewport and produce a
+                // fresh frame before we blit. Without this, the next RedrawRequested
+                // would blit the stale (pre-resize) offscreen FBO and you'd see
+                // the page content stretched/cropped until Servo caught up a
+                // frame later.
+                if let Some(engine) = &mut self.engine {
+                    engine.spin();
+                }
+                self.pending_paint = true;
                 self.request_redraw();
             }
 
@@ -1743,6 +1852,11 @@ impl ApplicationHandler<UserEvent> for App {
                 self.process_metadata_events();
                 self.process_hint_results();
                 self.process_search_results();
+                self.request_redraw();
+            }
+            UserEvent::HudAction(action) => {
+                log::info!("UserEvent::HudAction: {:?}", action);
+                self.dispatch_actions(vec![action]);
                 self.request_redraw();
             }
         }

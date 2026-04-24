@@ -1,2 +1,0 @@
-0
-Prototype of console prototype is Object.prototype

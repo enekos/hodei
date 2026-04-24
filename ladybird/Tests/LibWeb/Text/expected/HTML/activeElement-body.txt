@@ -1,3 +1,0 @@
-document.activeElement === document.body: true
-document.activeElement is null: false
-document.activeElement tagName: BODY

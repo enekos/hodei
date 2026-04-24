@@ -1,4 +1,0 @@
-b.offsetTop: 8
-b.offsetLeft: 8
-b.offsetWidth: 784
-b.offsetHeight: 54

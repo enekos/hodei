@@ -1,8 +1,0 @@
-Harness status: OK
-
-Found 3 tests
-
-3 Pass
-Pass	.inline-flexbox 1
-Pass	.inline-flexbox 2
-Pass	.inline-flexbox 3

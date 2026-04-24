@@ -1,3 +1,0 @@
-none
-discard-inner
-discard-after discard-inner

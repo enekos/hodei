@@ -143,4 +143,52 @@ mod tests {
         let elements = parse_hint_elements("[]").unwrap();
         assert!(elements.is_empty());
     }
+
+    #[test]
+    fn three_char_labels_appear_for_large_counts() {
+        let labels = generate_labels(100);
+        assert_eq!(labels.len(), 100);
+        assert!(labels.iter().all(|l| l.len() == 3));
+    }
+
+    #[test]
+    fn labels_use_only_home_row_chars() {
+        // Any non-home-row char would make hints unreachable.
+        let home = "asdfghjkl";
+        for l in generate_labels(200) {
+            for c in l.chars() {
+                assert!(home.contains(c), "label {l:?} contains off-row char {c:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn filter_with_full_label_matches_exactly_one() {
+        let labels = generate_labels(20);
+        let target = labels[5].clone();
+        let filtered = filter_labels(&target, &labels);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0], &target);
+    }
+
+    #[test]
+    fn filter_with_empty_prefix_matches_all() {
+        let labels = generate_labels(9);
+        assert_eq!(filter_labels("", &labels).len(), 9);
+    }
+
+    #[test]
+    fn parse_hint_elements_malformed_returns_err() {
+        assert!(parse_hint_elements("{not json").is_err());
+        assert!(parse_hint_elements("[{\"tag\":5}]").is_err()); // tag must be string
+    }
+
+    #[test]
+    fn query_script_has_selector_coverage() {
+        // Changing this script is a cross-cutting change; pin the selectors
+        // Hodei relies on. If you intentionally drop one, update the test.
+        for needle in ["a[href]", "button", "input", "[role=\"button\"]", "tabindex"] {
+            assert!(HINT_QUERY_SCRIPT.contains(needle), "missing selector {needle}");
+        }
+    }
 }

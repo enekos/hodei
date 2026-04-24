@@ -1,3 +1,0 @@
-[object CSSStyleProperties]
-[object DOMRectList]
-PASS (didn't crash)

@@ -1,2 +1,0 @@
-spanRule: [object CSSStyleRule] ~ span { float: right; }
-spanRule.style.cssFloat: right

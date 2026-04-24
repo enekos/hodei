@@ -1,9 +1,0 @@
-#import <CSS/CSSNumericValue.idl>
-
-// https://drafts.css-houdini.org/css-typed-om-1/#cssnumericarray
-[Exposed=(Window, Worker, PaintWorklet, LayoutWorklet)]
-interface CSSNumericArray {
-    iterable<CSSNumericValue>;
-    readonly attribute unsigned long length;
-    getter CSSNumericValue (unsigned long index);
-};

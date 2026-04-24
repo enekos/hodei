@@ -1,3 +1,0 @@
-Empty string: ""
-Simple text: "foo"
-Text with newlines: "<br>foo<br>bar<br>baz<br><br>foobar<br>"

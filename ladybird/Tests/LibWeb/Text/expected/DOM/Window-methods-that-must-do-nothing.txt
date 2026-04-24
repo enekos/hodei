@@ -1,2 +1,0 @@
-window.captureEvents() returns undefined: true
-window.releaseEvents() returns undefined: true

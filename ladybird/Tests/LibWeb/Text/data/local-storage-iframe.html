@@ -1,6 +1,0 @@
-<!DOCTYPE html>
-<script>
-    const key = new URLSearchParams(location.search).get("key");
-    localStorage.setItem(key, "barbaz");
-    parent.postMessage("local storage set", "*");
-</script>

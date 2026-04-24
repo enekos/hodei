@@ -1,3 +1,0 @@
-closerequest="Any" should respond to light dismissal
-other dialogs should not respond to light dismissal
-PASS

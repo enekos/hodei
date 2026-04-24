@@ -1,1 +1,0 @@
-Hello world, this was printed by a JavaScript navigation!

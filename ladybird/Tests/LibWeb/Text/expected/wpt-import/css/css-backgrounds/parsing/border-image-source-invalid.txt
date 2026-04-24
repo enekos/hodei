@@ -1,7 +1,0 @@
-Harness status: OK
-
-Found 2 tests
-
-2 Pass
-Pass	e.style['border-image-source'] = "auto" should not set the property value
-Pass	e.style['border-image-source'] = "none, url(\"http://www.example.com/\")" should not set the property value

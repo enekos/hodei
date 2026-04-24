@@ -1,2 +1,0 @@
-Name: test.txt
-Type: text/plain

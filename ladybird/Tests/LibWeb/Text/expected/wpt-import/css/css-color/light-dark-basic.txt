@@ -1,7 +1,0 @@
-Harness status: OK
-
-Found 2 tests
-
-2 Pass
-Pass	light-dark(white, black)
-Pass	light-dark(light-dark(white, red), red)

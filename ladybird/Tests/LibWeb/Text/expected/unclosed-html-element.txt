@@ -1,1 +1,0 @@
-HTML element has '<head' attribute: true

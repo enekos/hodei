@@ -1,3 +1,0 @@
-div#a p: rgb(0, 128, 0)
-div#b p: rgb(0, 128, 0)
-div#c p: rgb(0, 128, 0)

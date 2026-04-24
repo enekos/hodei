@@ -1,7 +1,0 @@
-Harness status: OK
-
-Found 2 tests
-
-2 Pass
-Pass	Property scroll-behavior has initial value auto
-Pass	Property scroll-behavior does not inherit

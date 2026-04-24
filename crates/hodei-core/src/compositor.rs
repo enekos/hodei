@@ -183,9 +183,10 @@ impl Compositor {
              1.0,  1.0,  1.0, 1.0,
             -1.0,  1.0,  0.0, 1.0,
         ];
+        // SAFETY: reinterpret the f32 slice as bytes for OpenGL upload.
         let bytes: &[u8] = core::slice::from_raw_parts(
             vertices.as_ptr() as *const u8,
-            vertices.len() * core::mem::size_of::<f32>(),
+            std::mem::size_of_val(vertices),
         );
         let vao = gl.create_vertex_array().expect("create VAO");
         gl.bind_vertex_array(Some(vao));

@@ -1,4 +1,0 @@
-key: my-key
-oldValue: null
-newValue: hello
-storageArea: sessionStorage

@@ -1,2 +1,0 @@
-null
-PASS (didn't throw!)

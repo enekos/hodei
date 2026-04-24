@@ -1,2 +1,0 @@
-document.documentElement.scrollWidth: 1242
-document.documentElement.scrollHeight: 1481

@@ -1,4 +1,0 @@
-[object HTMLDocument]
-true
-[object HTMLDocument]
-true

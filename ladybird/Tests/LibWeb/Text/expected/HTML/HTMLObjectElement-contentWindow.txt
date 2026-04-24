@@ -1,2 +1,0 @@
-object.contentWindow initial value should be null: true
-contentWindow.name should be the same as object.name PASS

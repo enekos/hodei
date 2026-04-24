@@ -72,7 +72,7 @@ impl BookmarkManager {
         Ok(count > 0)
     }
 
-    fn quickmark_tag(slot: u8) -> String {
+    pub(crate) fn quickmark_tag(slot: u8) -> String {
         format!("__quickmark:{}__", slot)
     }
 
@@ -180,5 +180,63 @@ mod tests {
         bm.set_quickmark(2, "https://new.com", "New").unwrap();
         let qm = bm.get_quickmark(2).unwrap();
         assert_eq!(qm.unwrap().url, "https://new.com");
+    }
+
+    #[test]
+    fn remove_missing_returns_false() {
+        let bm = make_bookmarks();
+        assert!(!bm.remove("https://never-added.test").unwrap());
+    }
+
+    #[test]
+    fn remove_existing_returns_true() {
+        let bm = make_bookmarks();
+        bm.add("https://x.test", "X", "").unwrap();
+        assert!(bm.remove("https://x.test").unwrap());
+        assert!(!bm.is_bookmarked("https://x.test").unwrap());
+    }
+
+    #[test]
+    fn is_bookmarked_empty_db() {
+        let bm = make_bookmarks();
+        assert!(!bm.is_bookmarked("https://anything.test").unwrap());
+    }
+
+    #[test]
+    fn quickmark_missing_slot_returns_none() {
+        let bm = make_bookmarks();
+        assert!(bm.get_quickmark(7).unwrap().is_none());
+    }
+
+    #[test]
+    fn quickmark_slots_are_independent() {
+        let bm = make_bookmarks();
+        bm.set_quickmark(0, "https://a.test", "A").unwrap();
+        bm.set_quickmark(9, "https://b.test", "B").unwrap();
+        assert_eq!(bm.get_quickmark(0).unwrap().unwrap().url, "https://a.test");
+        assert_eq!(bm.get_quickmark(9).unwrap().unwrap().url, "https://b.test");
+    }
+
+    #[test]
+    fn list_all_respects_limit() {
+        let bm = make_bookmarks();
+        for i in 0..5 {
+            bm.add(&format!("https://{}.test", i), &format!("S{}", i), "").unwrap();
+        }
+        assert_eq!(bm.list_all(3).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn search_no_match_returns_empty() {
+        let bm = make_bookmarks();
+        bm.add("https://rust.test", "Rust", "lang").unwrap();
+        assert!(bm.search("python", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn quickmark_tag_format_is_stable() {
+        // The `__quickmark:N__` shape is persisted — changing it would
+        // silently invalidate users' existing quickmarks.
+        assert_eq!(BookmarkManager::quickmark_tag(3), "__quickmark:3__");
     }
 }

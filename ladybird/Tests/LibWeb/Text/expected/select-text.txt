@@ -1,7 +1,0 @@
-Lorem
-Lorem ip
-dolor
-dolor s
-dolor sit
-First paragraph for triple-click test.
-    Second paragraph with a link inside.

@@ -1,2 +1,0 @@
-foo<font face="monospace">bar</font>
-<font face="sans-serif">foobar</font>

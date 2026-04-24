@@ -1,7 +1,0 @@
-Harness status: OK
-
-Found 2 tests
-
-2 Pass
-Pass	Valid the algorithm rule of offsetParent check step 1
-Pass	Valid the algorithm rule of offsetParent check step 2

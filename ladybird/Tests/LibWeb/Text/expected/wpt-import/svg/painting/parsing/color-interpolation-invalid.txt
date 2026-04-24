@@ -1,7 +1,0 @@
-Harness status: OK
-
-Found 2 tests
-
-2 Pass
-Pass	e.style['color-interpolation'] = "none" should not set the property value
-Pass	e.style['color-interpolation'] = "auto srgb" should not set the property value

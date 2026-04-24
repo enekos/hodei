@@ -1,4 +1,0 @@
-Transform parent, overflow child:
-<DIV id="box">
-Transform and overflow on same element:
-<A id="target">

@@ -1,5 +1,0 @@
-// https://html.spec.whatwg.org/multipage/canvas.html#canvassettings
-interface mixin CanvasSettings {
-    // settings
-    CanvasRenderingContext2DSettings getContextAttributes();
-};

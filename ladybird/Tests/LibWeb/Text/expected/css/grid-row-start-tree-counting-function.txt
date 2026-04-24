@@ -1,2 +1,0 @@
-#foo { grid-row-start: sibling-count(); }
-#bar { grid-row-start: span sibling-count(); }

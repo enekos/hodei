@@ -6,6 +6,9 @@ use winit::event_loop::{ControlFlow, EventLoop};
 #[derive(Debug)]
 pub enum UserEvent {
     ServoTick,
+    /// Emitted by Slint HUD callbacks — drained on the main thread so we can
+    /// borrow `self` mutably.
+    HudAction(hodei_core::input::Action),
 }
 
 fn main() {

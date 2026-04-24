@@ -21,6 +21,13 @@ impl Rect {
     pub fn contains(&self, px: f32, py: f32) -> bool {
         px >= self.x && px < self.x + self.width && py >= self.y && py < self.y + self.height
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.width <= 0.0 || self.height <= 0.0
+    }
+
+    pub fn right(&self) -> f32 { self.x + self.width }
+    pub fn bottom(&self) -> f32 { self.y + self.height }
 }
 
 // === Directions ===
@@ -60,6 +67,14 @@ pub struct Modifiers {
     pub shift: bool,
     pub alt: bool,
     pub meta: bool,
+}
+
+impl Modifiers {
+    /// True when no modifier is held — useful for distinguishing a bare
+    /// keypress from a chord.
+    pub fn is_empty(&self) -> bool {
+        !self.ctrl && !self.shift && !self.alt && !self.meta
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -202,5 +217,106 @@ mod tests {
         assert!(!m.shift);
         assert!(!m.alt);
         assert!(!m.meta);
+    }
+
+    #[test]
+    fn rect_contains_is_half_open() {
+        // Left/top edges inside, right/bottom edges outside — this matches the
+        // expectation that tiling rects tile without double-counting shared
+        // borders.
+        let r = Rect::new(10.0, 20.0, 100.0, 50.0);
+        assert!(r.contains(10.0, 20.0));            // top-left corner: in
+        assert!(!r.contains(110.0, 40.0));          // right edge: out
+        assert!(!r.contains(50.0, 70.0));           // bottom edge: out
+        assert!(!r.contains(9.9999, 40.0));         // just-left: out
+    }
+
+    #[test]
+    fn rect_is_empty_handles_zero_and_negative() {
+        assert!(Rect::default().is_empty());
+        assert!(Rect::new(0.0, 0.0, 0.0, 10.0).is_empty());
+        assert!(Rect::new(0.0, 0.0, 10.0, 0.0).is_empty());
+        assert!(Rect::new(0.0, 0.0, -1.0, 10.0).is_empty());
+        assert!(!Rect::new(0.0, 0.0, 10.0, 10.0).is_empty());
+    }
+
+    #[test]
+    fn rect_right_bottom() {
+        let r = Rect::new(5.0, 10.0, 100.0, 200.0);
+        assert_eq!(r.right(), 105.0);
+        assert_eq!(r.bottom(), 210.0);
+    }
+
+    #[test]
+    fn modifiers_is_empty() {
+        assert!(Modifiers::default().is_empty());
+        let m = Modifiers { ctrl: true, ..Default::default() };
+        assert!(!m.is_empty());
+    }
+
+    #[test]
+    fn direction_is_copyable_and_equatable() {
+        let a = Direction::Up;
+        let b = a;                     // Copy
+        assert_eq!(a, b);              // PartialEq
+        assert_ne!(Direction::Up, Direction::Down);
+    }
+
+    #[test]
+    fn split_direction_roundtrip_through_storage() {
+        // Simulates the session-serialization path ("h"/"v" strings).
+        for d in [SplitDirection::Horizontal, SplitDirection::Vertical] {
+            let s = match d {
+                SplitDirection::Horizontal => "h",
+                SplitDirection::Vertical => "v",
+            };
+            let back = match s {
+                "h" => SplitDirection::Horizontal,
+                "v" => SplitDirection::Vertical,
+                _ => unreachable!(),
+            };
+            assert_eq!(d, back);
+        }
+    }
+
+    #[test]
+    fn core_key_event_equality() {
+        let a = CoreKeyEvent {
+            key: CoreKey::Char('x'),
+            state: KeyState::Pressed,
+            modifiers: Modifiers::default(),
+        };
+        let b = a.clone();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn mouse_event_move_is_distinct_from_down() {
+        let m = CoreMouseEvent::Move { x: 1.0, y: 2.0 };
+        let d = CoreMouseEvent::Down { x: 1.0, y: 2.0, button: MouseButton::Left };
+        assert_ne!(m, d);
+    }
+
+    #[test]
+    fn view_id_is_hashable() {
+        let mut set = std::collections::HashSet::new();
+        set.insert(ViewId(1));
+        set.insert(ViewId(1));
+        set.insert(ViewId(2));
+        assert_eq!(set.len(), 2);
+    }
+
+    #[test]
+    fn tile_load_status_progression_is_distinct() {
+        assert_ne!(TileLoadStatus::Started, TileLoadStatus::HeadParsed);
+        assert_ne!(TileLoadStatus::HeadParsed, TileLoadStatus::Complete);
+    }
+
+    #[test]
+    fn hint_element_deserialises() {
+        let json = r#"{"tag":"BUTTON","href":"","text":"OK","x":42.0,"y":7.5}"#;
+        let e: HintElement = serde_json::from_str(json).unwrap();
+        assert_eq!(e.tag, "BUTTON");
+        assert!(e.href.is_empty());
     }
 }

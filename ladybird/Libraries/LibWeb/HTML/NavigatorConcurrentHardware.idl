@@ -1,4 +1,0 @@
-// https://html.spec.whatwg.org/multipage/workers.html#navigatorconcurrenthardware
-interface mixin NavigatorConcurrentHardware {
-    readonly attribute unsigned long long hardwareConcurrency;
-};

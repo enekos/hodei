@@ -1,3 +1,0 @@
-svg.ownerSVGElement = 'null'
-linearGradient.ownerSVGElement = '[object SVGSVGElement]'
-linearGradient.ownerSVGElement == svg = 'true'

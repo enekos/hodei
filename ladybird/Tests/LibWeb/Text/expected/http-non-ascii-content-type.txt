@@ -1,2 +1,0 @@
-Content-Type:text/html;test=ÿ;charset=gbk
-PASS (didn't crash)

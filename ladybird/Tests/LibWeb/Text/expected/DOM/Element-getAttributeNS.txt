@@ -1,4 +1,0 @@
-xlink:ref getAttribute = 'null'
-xlink:ref getAttributeNS = 'test'
-href getAttribute = 'test'
-href getAttributeNS = 'null'

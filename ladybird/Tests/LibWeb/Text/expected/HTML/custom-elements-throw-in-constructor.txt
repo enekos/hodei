@@ -1,3 +1,0 @@
-Entered TestElement constructor, throwing.
-Uncaught exception: test
-PASS! (Didn't crash)

@@ -1,3 +1,0 @@
-no-referrer: PASS
-origin: PASS
-unsafe-url: PASS

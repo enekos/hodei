@@ -1,1 +1,0 @@
-@function --foo(--bar) { --baz: var(--bar); result: var(--baz); }

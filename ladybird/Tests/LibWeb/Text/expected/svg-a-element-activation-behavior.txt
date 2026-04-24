@@ -1,2 +1,0 @@
-basic link activated
-target link activated in iframe

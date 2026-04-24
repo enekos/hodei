@@ -1,2 +1,0 @@
-window.find("test") initial result: true
-window.find("test") after clearing the previous selection: true

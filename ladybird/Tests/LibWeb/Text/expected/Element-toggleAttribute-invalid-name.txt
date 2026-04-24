@@ -1,2 +1,0 @@
-PASS (''): InvalidCharacterError
-PASS ('='): InvalidCharacterError

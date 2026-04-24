@@ -1,2 +1,0 @@
-CountQueuingStrategy | size1 === size2 -> true
-ByteLengthQueuingStrategy | size1 === size2 -> true

@@ -1,3 +1,0 @@
-normal
-normal
-preserve discard-inner

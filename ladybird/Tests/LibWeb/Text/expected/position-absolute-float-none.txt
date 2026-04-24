@@ -1,2 +1,0 @@
-float: none
-position: absolute

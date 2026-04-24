@@ -1,2 +1,0 @@
-Received a message: 'Hello from iframe in the shadow root of the just inserted div!'
-Was it from the shadow root iframe? true

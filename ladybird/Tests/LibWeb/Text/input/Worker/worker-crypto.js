@@ -1,1 +1,0 @@
-postMessage(self.crypto.toString());

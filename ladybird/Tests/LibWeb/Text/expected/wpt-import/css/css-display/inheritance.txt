@@ -1,7 +1,0 @@
-Harness status: OK
-
-Found 2 tests
-
-2 Pass
-Pass	Property display has initial value inline
-Pass	Property display does not inherit

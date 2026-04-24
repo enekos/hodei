@@ -1,3 +1,0 @@
-initial: false
-after single click: true
-after double click: true

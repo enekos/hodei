@@ -267,6 +267,80 @@ impl Hud {
         self.hud_instance.set_can_forward(v);
     }
 
+    // === Top-bar click callbacks ===
+
+    pub fn on_clicked_back(&self, f: impl Fn() + 'static) {
+        self.hud_instance.on_clicked_back(f);
+    }
+    pub fn on_clicked_forward(&self, f: impl Fn() + 'static) {
+        self.hud_instance.on_clicked_forward(f);
+    }
+    pub fn on_clicked_reload(&self, f: impl Fn() + 'static) {
+        self.hud_instance.on_clicked_reload(f);
+    }
+    pub fn on_clicked_home(&self, f: impl Fn() + 'static) {
+        self.hud_instance.on_clicked_home(f);
+    }
+    pub fn on_clicked_split_v(&self, f: impl Fn() + 'static) {
+        self.hud_instance.on_clicked_split_v(f);
+    }
+    pub fn on_clicked_split_h(&self, f: impl Fn() + 'static) {
+        self.hud_instance.on_clicked_split_h(f);
+    }
+    pub fn on_clicked_close(&self, f: impl Fn() + 'static) {
+        self.hud_instance.on_clicked_close(f);
+    }
+    pub fn on_clicked_swap(&self, f: impl Fn() + 'static) {
+        self.hud_instance.on_clicked_swap(f);
+    }
+    pub fn on_clicked_hint(&self, f: impl Fn() + 'static) {
+        self.hud_instance.on_clicked_hint(f);
+    }
+    pub fn on_clicked_search(&self, f: impl Fn() + 'static) {
+        self.hud_instance.on_clicked_search(f);
+    }
+    pub fn on_clicked_command(&self, f: impl Fn() + 'static) {
+        self.hud_instance.on_clicked_command(f);
+    }
+    pub fn on_clicked_bookmark(&self, f: impl Fn() + 'static) {
+        self.hud_instance.on_clicked_bookmark(f);
+    }
+    pub fn on_clicked_shortcuts_dismiss(&self, f: impl Fn() + 'static) {
+        self.hud_instance.on_clicked_shortcuts_dismiss(f);
+    }
+
+    /// Dispatch a pointer event to Slint in *physical* pixels. Slint internally
+    /// divides by the scale factor.
+    pub fn dispatch_pointer_moved(&self, phys_x: f32, phys_y: f32) {
+        let lx = phys_x / self.scale_factor;
+        let ly = phys_y / self.scale_factor;
+        self.window.dispatch_event(slint::platform::WindowEvent::PointerMoved {
+            position: slint::LogicalPosition::new(lx, ly),
+        });
+    }
+
+    pub fn dispatch_pointer_pressed(&self, phys_x: f32, phys_y: f32) {
+        let lx = phys_x / self.scale_factor;
+        let ly = phys_y / self.scale_factor;
+        self.window.dispatch_event(slint::platform::WindowEvent::PointerPressed {
+            position: slint::LogicalPosition::new(lx, ly),
+            button: slint::platform::PointerEventButton::Left,
+        });
+    }
+
+    pub fn dispatch_pointer_released(&self, phys_x: f32, phys_y: f32) {
+        let lx = phys_x / self.scale_factor;
+        let ly = phys_y / self.scale_factor;
+        self.window.dispatch_event(slint::platform::WindowEvent::PointerReleased {
+            position: slint::LogicalPosition::new(lx, ly),
+            button: slint::platform::PointerEventButton::Left,
+        });
+    }
+
+    pub fn dispatch_pointer_exited(&self) {
+        self.window.dispatch_event(slint::platform::WindowEvent::PointerExited);
+    }
+
     pub fn clear_hints(&self) {
         log::trace!("Hud::clear_hints");
         let empty: Vec<HintLabel> = vec![];

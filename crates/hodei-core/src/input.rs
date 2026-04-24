@@ -153,6 +153,10 @@ pub struct InputRouter {
     normal_bindings: HashMap<KeyCombo, Action>,
 }
 
+impl Default for InputRouter {
+    fn default() -> Self { Self::new() }
+}
+
 impl InputRouter {
     pub fn new() -> Self {
         log::debug!("InputRouter::new: initializing with default bindings");

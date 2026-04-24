@@ -1,7 +1,0 @@
-Harness status: OK
-
-Found 2 tests
-
-2 Pass
-Pass	document.open() after parser is aborted
-Pass	async document.open() after parser is aborted

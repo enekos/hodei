@@ -1,2 +1,0 @@
-dialog.open state before show(): false
-dialog.open state after show(): true

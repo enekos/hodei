@@ -1,6 +1,0 @@
---- a ---
-Before: foo👩🏼‍❤️‍👨🏻bar
-After: foobar
---- b ---
-Before: foo👩🏼‍❤️‍👨🏻bar
-After: foobar

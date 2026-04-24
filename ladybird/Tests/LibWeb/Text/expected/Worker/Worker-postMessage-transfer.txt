@@ -1,3 +1,0 @@
-Buffer length before transfer: 12
-Buffer length after transfer: 0
-Message received from worker: Hello, world

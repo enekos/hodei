@@ -1,3 +1,0 @@
-container height: 80
-item height: 40
-item height is 50% of resolved aspect-ratio height: true

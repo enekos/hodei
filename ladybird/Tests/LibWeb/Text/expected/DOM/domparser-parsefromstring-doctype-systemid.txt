@@ -1,3 +1,0 @@
-PASSED doctype.name
-PASSED doctype.systemId
-PASSED doctype.publicId

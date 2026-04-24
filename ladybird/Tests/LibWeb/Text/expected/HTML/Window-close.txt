@@ -1,3 +1,0 @@
-window.closed = false
-window.closed = true
-window.closed = true

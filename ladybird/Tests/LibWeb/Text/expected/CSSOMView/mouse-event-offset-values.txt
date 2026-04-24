@@ -1,2 +1,0 @@
-offsetX: 45.75
-offsetY: 57.078125

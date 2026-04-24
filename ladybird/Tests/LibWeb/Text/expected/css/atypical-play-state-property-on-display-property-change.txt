@@ -1,3 +1,0 @@
-foo: PASS!
-bar: PASS!
-baz: PASS!

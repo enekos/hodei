@@ -1,7 +1,0 @@
-Harness status: OK
-
-Found 2 tests
-
-2 Pass
-Pass	Negating a type with empty map returns the empty map
-Pass	Negating a type returns the same type

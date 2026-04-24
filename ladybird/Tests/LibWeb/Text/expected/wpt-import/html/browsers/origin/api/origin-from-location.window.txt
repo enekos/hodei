@@ -1,7 +1,0 @@
-Harness status: OK
-
-Found 2 tests
-
-2 Pass
-Pass	Origin.from(window.location) throws.
-Pass	Origin.from(Location) throws for cross-origin frames.

@@ -1,2 +1,0 @@
-set(VCPKG_BUILD_TYPE release)
-set(VCPKG_LIBRARY_LINKAGE dynamic)

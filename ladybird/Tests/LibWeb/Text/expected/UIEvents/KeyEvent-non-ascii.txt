@@ -1,6 +1,0 @@
-keydown à
-keydown á
-keydown â
-keydown ã
-keydown ä
-keydown å

@@ -1,5 +1,0 @@
-initial: first
-after reorder: second
-after first id change: second
-after removing second: null
-after restoring first: true

@@ -1,7 +1,0 @@
-Harness status: OK
-
-Found 2 tests
-
-2 Pass
-Pass	Property mask-type value 'luminance'
-Pass	Property mask-type value 'alpha'

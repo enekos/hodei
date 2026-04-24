@@ -1,8 +1,0 @@
-x: 260
-y: 0
-width: 540
-height: 390
-x: 0
-y: 210
-width: 540
-height: 390

@@ -1,2 +1,0 @@
-window.find("inert") initial result: true
-window.find("inert") second call: false

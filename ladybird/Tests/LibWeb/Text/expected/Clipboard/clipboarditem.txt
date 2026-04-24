@@ -1,3 +1,0 @@
-types: text/plain,text/uri-list
-getType('text/plain'): hello
-getType('text/uri-list'): https://example.com

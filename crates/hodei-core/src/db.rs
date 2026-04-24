@@ -60,4 +60,53 @@ mod tests {
         // Running migrations again should not fail
         run_migrations(&conn).unwrap();
     }
+
+    #[test]
+    fn open_on_disk_then_reopen_preserves_data() {
+        let dir = std::env::temp_dir().join("hodei-test-db-reopen");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.db");
+        std::fs::remove_file(&path).ok();
+
+        {
+            let conn = open_database(&path).unwrap();
+            conn.execute(
+                "INSERT INTO history (url, title) VALUES (?1, ?2)",
+                rusqlite::params!["https://preserved.test", "preserved"],
+            )
+            .unwrap();
+        }
+
+        let conn = open_database(&path).unwrap();
+        let title: String = conn
+            .query_row(
+                "SELECT title FROM history WHERE url = ?1",
+                rusqlite::params!["https://preserved.test"],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(title, "preserved");
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn foreign_keys_are_enforced() {
+        let conn = open_database_in_memory().unwrap();
+        // tiles has FK session_id -> sessions(id). Inserting with a bogus
+        // session_id should fail when foreign_keys=ON.
+        let err = conn.execute(
+            "INSERT INTO tiles (session_id, view_id, url, title, scroll_x, scroll_y) \
+             VALUES (999, 1, '', '', 0, 0)",
+            [],
+        );
+        assert!(err.is_err(), "expected FK violation, got {err:?}");
+    }
+
+    #[test]
+    fn sessions_table_has_is_active_after_migration_003() {
+        let conn = open_database_in_memory().unwrap();
+        // Migration 003 adds is_active — smoke test it's present.
+        assert!(conn.prepare("SELECT is_active FROM sessions LIMIT 0").is_ok());
+    }
 }

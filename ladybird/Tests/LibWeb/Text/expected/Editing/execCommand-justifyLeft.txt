@@ -1,2 +1,0 @@
-foobar
-<div style="">foobar</div>

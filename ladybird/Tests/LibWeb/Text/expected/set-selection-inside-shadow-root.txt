@@ -1,2 +1,0 @@
-Selection range count: 1
-Selection start offset: 0, end offset: 1

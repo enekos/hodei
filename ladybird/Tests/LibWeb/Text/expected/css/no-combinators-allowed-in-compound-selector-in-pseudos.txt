@@ -1,6 +1,0 @@
-::slotted(> a) is invalid: PASS
-::slotted(+ a) is invalid: PASS
-::slotted(~ a) is invalid: PASS
-:host(> a) is invalid: PASS
-:host(+ a) is invalid: PASS
-:host(~ a) is invalid: PASS

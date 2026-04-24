@@ -1,2 +1,0 @@
-ready is a Promise: true
-ready is the same object on second access: true

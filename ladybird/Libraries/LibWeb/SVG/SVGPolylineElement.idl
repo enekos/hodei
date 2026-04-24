@@ -1,8 +1,0 @@
-#import <SVG/SVGGeometryElement.idl>
-
-// https://svgwg.org/svg2-draft/single-page.html#shapes-InterfaceSVGPolylineElement
-[Exposed=Window]
-interface SVGPolylineElement : SVGGeometryElement {
-};
-
-// SVGPolylineElement includes SVGAnimatedPoints;

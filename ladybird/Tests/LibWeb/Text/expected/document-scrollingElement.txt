@@ -1,2 +1,0 @@
-document.compatMode: CSS1Compat
-document.scrollingElement is document root element: true

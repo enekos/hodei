@@ -1,4 +1,0 @@
-set_font: PASS
-fillText: PASS
-strokeText: PASS
-measureText: PASS

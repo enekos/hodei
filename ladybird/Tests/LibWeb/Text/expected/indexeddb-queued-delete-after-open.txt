@@ -1,6 +1,0 @@
-open.upgradeneeded
-open.success
-conn.versionchange
-conn.close() called
-delete.success
-DONE

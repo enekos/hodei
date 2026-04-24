@@ -1,2 +1,0 @@
-128
-InvalidStateError: Rendering is already started

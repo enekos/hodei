@@ -1,2 +1,0 @@
-" is a di"
-<DIALOG id="dialog">

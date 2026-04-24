@@ -14,6 +14,10 @@ pub struct ViewManager {
     next_id: u64,
 }
 
+impl Default for ViewManager {
+    fn default() -> Self { Self::new() }
+}
+
 impl ViewManager {
     pub fn new() -> Self {
         log::debug!("ViewManager::new");
@@ -185,5 +189,89 @@ mod tests {
         let id = vm.create("https://x.com");
         let v = vm.get(id);
         assert_eq!(effective_project(v, None), None);
+    }
+
+    #[test]
+    fn remove_missing_returns_none() {
+        let mut vm = ViewManager::new();
+        assert!(vm.remove(ViewId(999)).is_none());
+    }
+
+    #[test]
+    fn get_mut_allows_in_place_mutation() {
+        let mut vm = ViewManager::new();
+        let id = vm.create("https://x.com");
+        vm.get_mut(id).unwrap().title = "Updated".into();
+        assert_eq!(vm.get(id).unwrap().title, "Updated");
+    }
+
+    #[test]
+    fn next_id_is_peekable_and_stable_until_create() {
+        let mut vm = ViewManager::new();
+        assert_eq!(vm.next_id(), ViewId(1));
+        assert_eq!(vm.next_id(), ViewId(1)); // peek again
+        let id = vm.create("https://x.com");
+        assert_eq!(id, ViewId(1));
+        assert_eq!(vm.next_id(), ViewId(2));
+    }
+
+    #[test]
+    fn create_with_id_higher_than_counter_bumps_counter() {
+        let mut vm = ViewManager::new();
+        vm.create_with_id(ViewId(42), "https://x");
+        let auto = vm.create("https://y");
+        assert_eq!(auto, ViewId(43));
+    }
+
+    #[test]
+    fn create_with_id_lower_than_counter_does_not_rewind() {
+        let mut vm = ViewManager::new();
+        let _ = vm.create("a");
+        let _ = vm.create("b"); // next_id now 3
+        vm.create_with_id(ViewId(1), "overwrite-ish");
+        // Counter stays at 3 — we never hand out IDs we've already used.
+        assert_eq!(vm.create("c"), ViewId(3));
+    }
+
+    #[test]
+    fn all_views_and_count_match() {
+        let mut vm = ViewManager::new();
+        vm.create("a");
+        vm.create("b");
+        vm.create("c");
+        assert_eq!(vm.count(), 3);
+        assert_eq!(vm.all_views().len(), 3);
+    }
+
+    #[test]
+    fn dirty_views_empty_initially_when_all_cleared() {
+        let mut vm = ViewManager::new();
+        let a = vm.create("a");
+        let b = vm.create("b");
+        vm.clear_dirty(a);
+        vm.clear_dirty(b);
+        assert!(vm.dirty_views().is_empty());
+    }
+
+    #[test]
+    fn mark_or_clear_dirty_on_missing_is_noop() {
+        let mut vm = ViewManager::new();
+        vm.mark_dirty(ViewId(999));
+        vm.clear_dirty(ViewId(999));
+        assert!(vm.dirty_views().is_empty());
+    }
+
+    #[test]
+    fn effective_project_override_wins_even_with_workspace() {
+        let mut vm = ViewManager::new();
+        let id = vm.create("x");
+        vm.get_mut(id).unwrap().project_override = Some("owned".into());
+        assert_eq!(effective_project(vm.get(id), Some("other")), Some("owned"));
+    }
+
+    #[test]
+    fn effective_project_with_no_view_falls_back_to_workspace() {
+        assert_eq!(effective_project(None, Some("ws")), Some("ws"));
+        assert_eq!(effective_project(None, None), None);
     }
 }

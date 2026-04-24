@@ -1,5 +1,0 @@
-// https://html.spec.whatwg.org/multipage/canvas.html#canvasfilters
-interface mixin CanvasFilters {
-    // filters
-    attribute DOMString filter; // (default "none")
-};
